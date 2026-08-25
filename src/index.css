@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-bg: var(--color-bg-val);
+  --color-surface: var(--color-surface-val);
+  --color-surface-brighter: var(--color-surface-brighter-val);
+  --color-accent: var(--color-accent-val);
+  --color-success: var(--color-success-val);
+  --color-border: var(--color-border-val);
+  --color-muted: var(--color-muted-val);
+  --color-text: var(--color-text-val);
+  
+  --font-sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+:root {
+  --color-bg-val: #f5f5f7;
+  --color-surface-val: rgba(255, 255, 255, 0.4);
+  --color-surface-brighter-val: rgba(255, 255, 255, 0.6);
+  --color-accent-val: #007AFF;
+  --color-success-val: #34C759;
+  --color-border-val: rgba(255, 255, 255, 0.5);
+  --color-muted-val: #6e6e73;
+  --color-text-val: #1d1d1f;
+
+  --bg-color: #e0e7ff;
+  --bg-grad-1: #fbc2eb;
+  --bg-grad-2: #a6c1ee;
+  --bg-grad-3: #e0c3fc;
+  --bg-grad-4: #8ec5fc;
+}
+
+html.dark {
+  --color-bg-val: rgba(0, 0, 0, 0.01);
+  --color-surface-val: rgba(0, 0, 0, 0.01);
+  --color-surface-brighter-val: rgba(0, 0, 0, 0.01);
+  --color-accent-val: #3b82f6;
+  --color-success-val: #10b981;
+  --color-border-val: rgba(0, 0, 0, 0.01);
+  --color-muted-val: #94a3b8;
+  --color-text-val: #e2e8f0;
+
+  --bg-color: #050505;
+  --bg-grad-1: #312e81;
+  --bg-grad-2: #1e3a8a;
+  --bg-grad-3: #4c1d95;
+  --bg-grad-4: #172554;
+}
+
+html.dark button:not(.bg-accent):not(.bg-success):not(.bg-red-500):not(.bg-red-50) {
+  background-color: rgba(0, 0, 0, 0.01) !important;
+  color: #e2e8f0 !important;
+}
+
+html.dark button:not(.bg-accent):not(.bg-success):not(.bg-red-500):not(.bg-red-50):hover {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+@layer base {
+  * {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  *::-webkit-scrollbar {
+    display: none; /* Chrome, Safari and Opera */
+  }
+
+  body {
+    background-color: var(--bg-color);
+    background-image: 
+      radial-gradient(circle at 10% 10%, var(--bg-grad-1) 0%, transparent 40%),
+      radial-gradient(circle at 90% 10%, var(--bg-grad-2) 0%, transparent 40%),
+      radial-gradient(circle at 90% 90%, var(--bg-grad-3) 0%, transparent 40%),
+      radial-gradient(circle at 10% 90%, var(--bg-grad-4) 0%, transparent 40%);
+    background-attachment: fixed;
+    color: var(--color-text);
+    font-family: var(--font-sans);
+  }
+
+  button:not(.nav-tab) {
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  }
+  
+  button:not(.nav-tab):hover:not(:disabled) {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.7), 0 0 15px rgba(0, 229, 255, 0.5);
+  }
+  
+  button:not(.nav-tab):active:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5), 0 0 8px rgba(0, 229, 255, 0.3);
+  }
+
+  /* Fade Transition */
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes scan {
+    0% { top: -10%; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 110%; opacity: 0; }
+  }
+
+  .fade-transition {
+    animation: fade-in 0.3s ease-out both;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply border border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/40 dark:bg-transparent backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.05)] rounded-3xl;
+  }
+  
+  .glass-panel-heavy {
+    @apply border border-white/80 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/60 dark:bg-transparent backdrop-blur-3xl shadow-[0_12px_48px_rgba(0,0,0,0.1)] rounded-3xl;
+  }
+  
+  .active-accent {
+    @apply border-l-[4px] border-accent pl-4;
+  }
+
+  .status-dot {
+    @apply h-2.5 w-2.5 rounded-full inline-block;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari and Opera */
+  }
+  
+  .mask-edges {
+    mask-image: linear-gradient(to right, transparent, black 15px, black calc(100% - 15px), transparent);
+  }
+}

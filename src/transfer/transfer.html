@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QuantumLink Transfer</title>
+    <style>
+      #error-overlay {
+        display: none;
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); color: red; z-index: 999999; overflow: auto; padding: 20px; font-family: monospace; white-space: pre-wrap;
+      }
+    </style>
+    <script>
+      window.onerror = function(msg, url, line, col, error) {
+        document.getElementById('error-overlay').style.display = 'block';
+        document.getElementById('error-overlay').innerText += '\n' + msg + '\n' + (error && error.stack ? error.stack : '');
+      };
+      window.addEventListener('unhandledrejection', function(event) {
+        document.getElementById('error-overlay').style.display = 'block';
+        document.getElementById('error-overlay').innerText += '\nUnhandled Rejection: ' + event.reason;
+      });
+    </script>
+  </head>
+  <body>
+    <div id="error-overlay"></div>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>
