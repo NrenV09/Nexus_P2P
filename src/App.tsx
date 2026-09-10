@@ -944,7 +944,7 @@ export default function App() {
       </header>
 
       {/* Main Area */}
-      <main className="z-10 flex-1 p-6 overflow-hidden">
+      <main className="z-10 flex-1 p-2.5 sm:p-4 md:p-6 overflow-hidden">
         <AnimatePresence mode="wait">
           {activeTab === "failover" ? (
             <motion.div 
@@ -960,8 +960,12 @@ export default function App() {
                 localAvatarColor={profile.avatarColor}
                 localPeerId={profile.id}
                 realConnectedCount={connectedCount}
+                peerProfiles={peerProfiles}
+                role={role}
+                networkStatus={status}
                 isSimulation={isSimulation}
                 onToggleSimulation={toggleSimulation}
+                onNavigateToConnect={() => setActiveTab(role ? "chat" : "qr")}
               />
             </motion.div>
           ) : activeTab === "qr" ? (
