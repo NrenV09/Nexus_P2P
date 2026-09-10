@@ -45,3 +45,5 @@ export interface UserProfile {
   bio: string;
   joinedAt: string;
 }
+
+export * from './lib/nexusFailover';

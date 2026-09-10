@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Shield, 
+  ShieldCheck,
   Users, 
   Send, 
   RefreshCw, 
@@ -42,6 +43,7 @@ import { DataStream } from './components/DataStream';
 import { PacketTransferAnimation } from './components/PacketTransferAnimation';
 import { ProfileModal } from './components/ProfileModal';
 import { ViewProfileModal } from './components/ViewProfileModal';
+import { NexusFailoverHUD } from './components/NexusFailoverHUD';
 import { generateRandomName } from './lib/nameGenerator';
 
 const CHUNK_SIZE = 131072; // Max WebRTC chunk size (128KB)
@@ -878,6 +880,16 @@ export default function App() {
               Transceiver
             </button>
             <button 
+              onClick={() => { setActiveTab("failover"); addLog("Opening Nexus Mesh Failover HUD", "info"); }}
+              className={cn(
+                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap flex items-center gap-1.5",
+                activeTab === "failover" ? "bg-white dark:bg-transparent text-accent shadow-sm" : "text-muted hover:text-text cursor-pointer"
+              )}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-accent" />
+              Nexus Failover
+            </button>
+            <button 
               onClick={() => { setActiveTab("qr"); addLog("Entering QR Utility", "info"); }}
               className={cn(
                 "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap",
@@ -934,7 +946,25 @@ export default function App() {
       {/* Main Area */}
       <main className="z-10 flex-1 p-6 overflow-hidden">
         <AnimatePresence mode="wait">
-          {activeTab === "qr" ? (
+          {activeTab === "failover" ? (
+            <motion.div 
+              key="failover" 
+              initial={{ opacity: 0, y: 15, filter: "blur(4px)" }} 
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} 
+              exit={{ opacity: 0, y: -15, filter: "blur(4px)" }} 
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              className="h-full w-full"
+            >
+              <NexusFailoverHUD 
+                localUsername={profile.username}
+                localAvatarColor={profile.avatarColor}
+                localPeerId={profile.id}
+                realConnectedCount={connectedCount}
+                isSimulation={isSimulation}
+                onToggleSimulation={toggleSimulation}
+              />
+            </motion.div>
+          ) : activeTab === "qr" ? (
             <motion.div 
               key="qr" 
               initial={{ opacity: 0, y: 15, filter: "blur(4px)" }} 
