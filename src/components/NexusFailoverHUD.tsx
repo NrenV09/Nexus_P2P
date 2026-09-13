@@ -29,7 +29,7 @@ interface NexusFailoverHUDProps {
   realConnectedCount?: number;
   peerProfiles?: Record<string, { id: string; username: string; avatarColor: string; bio?: string; joinedAt?: string }>;
   role?: 'host' | 'join' | null;
-  networkStatus?: 'disconnected' | 'handshaking' | 'connected';
+  networkStatus?: 'offline' | 'disconnected' | 'handshaking' | 'connected';
   activeNode?: NexusNetworkNode | null;
   isSimulation?: boolean;
   onToggleSimulation?: () => void;
