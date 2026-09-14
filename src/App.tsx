@@ -45,6 +45,7 @@ import { ProfileModal } from './components/ProfileModal';
 import { ViewProfileModal } from './components/ViewProfileModal';
 import { NexusFailoverHUD } from './components/NexusFailoverHUD';
 import { CallOverlay } from './components/CallOverlay';
+import { IncomingCallModal, IncomingCallData } from './components/IncomingCallModal';
 import { generateRandomName } from './lib/nameGenerator';
 
 const CHUNK_SIZE = 131072; // Max WebRTC chunk size (128KB)
@@ -93,7 +94,56 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const localStreamRef = useRef<MediaStream | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
+  const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
+  const ringtoneCtxRef = useRef<AudioContext | null>(null);
+  const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const endCallRef = useRef<() => void>(() => {});
+
+  const playRingChime = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!ringtoneCtxRef.current || ringtoneCtxRef.current.state === 'closed') {
+        ringtoneCtxRef.current = new AudioCtx();
+      }
+      const ctx = ringtoneCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const playTone = () => {
+        if (!ctx || ctx.state === 'closed') return;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(780, ctx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+      };
+
+      playTone();
+      if (ringtoneIntervalRef.current) clearInterval(ringtoneIntervalRef.current);
+      ringtoneIntervalRef.current = setInterval(playTone, 2000);
+    } catch (e) {
+      console.warn("Could not play ringtone:", e);
+    }
+  }, []);
+
+  const stopRingChime = useCallback(() => {
+    if (ringtoneIntervalRef.current) {
+      clearInterval(ringtoneIntervalRef.current);
+      ringtoneIntervalRef.current = null;
+    }
+    if (ringtoneCtxRef.current) {
+      ringtoneCtxRef.current.close().catch(() => {});
+      ringtoneCtxRef.current = null;
+    }
+  }, []);
   const [files, setFiles] = useState<FilePayload[]>([]);
   const [transfer, setTransfer] = useState<TransferProgress | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -542,6 +592,49 @@ export default function App() {
                 }
               });
             }
+          } else if (data.type === 'call-invite') {
+            addLog(`Incoming ${data.callType} call from ${data.callerName || 'peer'}`, "info");
+            setIncomingCall({
+              peerId,
+              callerName: data.callerName || 'Peer',
+              callType: data.callType || 'video',
+              sdp: data.sdp
+            });
+            playRingChime();
+          } else if (data.type === 'call-answer') {
+            const pc = peerConnections.current.get(peerId);
+            if (pc) {
+              try {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                addLog("Direct encrypted media tunnel connected!", "ok");
+              } catch (e) {
+                console.error("Error setting remote description on call-answer:", e);
+              }
+            }
+          } else if (data.type === 'call-decline') {
+            addLog(`Call declined by ${data.by || 'peer'}`, "err");
+            endCallRef.current?.();
+          } else if (data.type === 'call-end') {
+            addLog("Call ended by peer", "info");
+            stopRingChime();
+            setIncomingCall(null);
+            if (localStreamRef.current) {
+              localStreamRef.current.getTracks().forEach(t => t.stop());
+              localStreamRef.current = null;
+            }
+            setLocalStream(null);
+            setIsCallActive(false);
+            setCallType(null);
+            setRemoteStreams({});
+          } else if (data.type === 'ice-candidate') {
+            const pc = peerConnections.current.get(peerId);
+            if (pc && data.candidate) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+              } catch (e) {
+                console.warn("ICE candidate error:", e);
+              }
+            }
           } else if (data.type === 'media-offer') {
             const pc = peerConnections.current.get(peerId);
             if (pc) {
@@ -656,7 +749,14 @@ export default function App() {
   }, [addLog]);
 
   const createPeer = useCallback((id: string) => {
-    const pc = new RTCPeerConnection({ iceServers: [] });
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+      ],
+      iceCandidatePoolSize: 2,
+    });
     peerConnections.current.set(id, pc);
     
     pc.oniceconnectionstatechange = () => {
@@ -665,36 +765,34 @@ export default function App() {
       }
     };
 
-    pc.ondatachannel = (event) => setupDataChannel(event.channel, id);
-    pc.onnegotiationneeded = async () => {
-      try {
-        if (pc.signalingState !== 'stable') return;
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
         const dc = dataChannels.current.get(id);
         if (dc && dc.readyState === 'open') {
-          dc.send(JSON.stringify({ type: 'media-offer', sdp: pc.localDescription }));
+          dc.send(JSON.stringify({
+            type: 'ice-candidate',
+            candidate: event.candidate
+          }));
         }
-      } catch (e) {
-        console.error(e);
       }
     };
 
+    pc.ondatachannel = (event) => setupDataChannel(event.channel, id);
+
     pc.ontrack = (event) => {
+      const track = event.track;
+      addLog(`Received incoming media stream track (${track.kind})`, "ok");
       setRemoteStreams(prev => {
-        const existing = prev[id] || new MediaStream();
-        event.streams[0]?.getTracks().forEach(track => {
-          if (!existing.getTracks().includes(track)) {
-             existing.addTrack(track);
-          }
-        });
-        return { ...prev, [id]: existing };
+        const currentStream = prev[id];
+        const existingTracks = currentStream ? currentStream.getTracks().filter(t => t.id !== track.id) : [];
+        const updatedStream = new MediaStream([...existingTracks, track]);
+        return { ...prev, [id]: updatedStream };
       });
     };
 
     localConnectionRef.current = pc;
     return pc;
-  }, [setupDataChannel]);
+  }, [setupDataChannel, addLog]);
 
   const waitForIce = (pc: RTCPeerConnection) => new Promise<void>((resolve) => {
     if (pc.iceGatheringState === 'complete') resolve();
@@ -795,7 +893,7 @@ export default function App() {
       });
     } catch (e) {
       if (isSimulation) {
-        addLog("Permission denied, using fake stream for simulation", "info");
+        addLog("Permission denied, using simulated stream", "info");
         const canvas = document.createElement('canvas');
         canvas.width = 640; canvas.height = 480;
         const ctx = canvas.getContext('2d');
@@ -804,24 +902,23 @@ export default function App() {
           ctx.fillRect(0, 0, 640, 480);
           ctx.fillStyle = '#ef4444';
           ctx.font = '24px monospace';
-          ctx.fillText('NO CAMERA/MIC ACCESS', 150, 240);
+          ctx.fillText('SIMULATION STREAM', 180, 240);
         }
         stream = (canvas as any).captureStream(30);
       } else {
-        addLog(`Failed to start ${type} call`, "err");
-        console.error(e);
+        addLog(`Could not access camera/microphone: ${(e as any)?.message || e}`, "err");
         return;
       }
     }
 
     localStreamRef.current = stream;
+    setLocalStream(stream);
     setCallType(type);
     setIsCallActive(true);
     addLog(`Started ${type} call`, "ok");
     
     if (isSimulation) {
       const fakeStreams: Record<string, MediaStream> = {};
-      
       if (type === 'video') {
         const canvas = document.createElement('canvas');
         canvas.width = 640; canvas.height = 480;
@@ -831,11 +928,10 @@ export default function App() {
           ctx.fillRect(0, 0, 640, 480);
           ctx.fillStyle = '#94a3b8';
           ctx.font = '24px monospace';
-          ctx.fillText('Simulated Video Stream', 150, 240);
+          ctx.fillText('Simulated Peer Video', 180, 240);
         }
         const canvasStream = (canvas as any).captureStream(30);
         fakeStreams['sim_peer_1'] = canvasStream;
-        fakeStreams['sim_peer_2'] = canvasStream;
       } else {
         const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContext) {
@@ -846,28 +942,162 @@ export default function App() {
           fakeStreams['sim_peer_1'] = new MediaStream();
         }
       }
-      
       setRemoteStreams(fakeStreams);
       return;
     }
 
-      peerConnections.current.forEach(pc => {
-        stream.getTracks().forEach(track => {
-          if (!pc.getSenders().find(s => s.track === track)) {
-            pc.addTrack(track, stream);
-          }
-        });
+    // Attach local tracks and notify all peers via call-invite with offer SDP
+    peerConnections.current.forEach(async (pc, peerId) => {
+      stream.getTracks().forEach(track => {
+        if (!pc.getSenders().find(s => s.track === track)) {
+          pc.addTrack(track, stream);
+        }
       });
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await waitForIce(pc);
+        const dc = dataChannels.current.get(peerId);
+        if (dc && dc.readyState === 'open') {
+          dc.send(JSON.stringify({
+            type: 'call-invite',
+            callType: type,
+            callerName: profile.username,
+            callerId: profile.id,
+            sdp: pc.localDescription
+          }));
+        }
+      } catch (err) {
+        console.error("Error creating call offer for peer " + peerId, err);
+      }
+    });
   };
 
-  const endCall = () => {
+  const acceptCall = async (incoming: IncomingCallData) => {
+    stopRingChime();
+    setIncomingCall(null);
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: incoming.callType === 'video'
+      });
+    } catch (e) {
+      addLog("Camera access restricted, attempting audio-only", "info");
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#1e293b';
+          ctx.fillRect(0, 0, 640, 480);
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '24px monospace';
+          ctx.fillText('NO CAMERA/MIC ACCESS', 170, 240);
+        }
+        stream = (canvas as any).captureStream(10);
+      }
+    }
+
+    localStreamRef.current = stream;
+    setLocalStream(stream);
+    setCallType(incoming.callType);
+    setIsCallActive(true);
+    addLog(`Joined ${incoming.callType} call with ${incoming.callerName}`, "ok");
+
+    const pc = peerConnections.current.get(incoming.peerId);
+    if (pc) {
+      stream.getTracks().forEach(track => {
+        if (!pc.getSenders().find(s => s.track === track)) {
+          pc.addTrack(track, stream);
+        }
+      });
+
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(incoming.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await waitForIce(pc);
+        const dc = dataChannels.current.get(incoming.peerId);
+        if (dc && dc.readyState === 'open') {
+          dc.send(JSON.stringify({
+            type: 'call-answer',
+            sdp: pc.localDescription
+          }));
+        }
+      } catch (err) {
+        console.error("Error setting answer on incoming call:", err);
+      }
+    }
+  };
+
+  const declineCall = (incoming: IncomingCallData) => {
+    stopRingChime();
+    setIncomingCall(null);
+    const dc = dataChannels.current.get(incoming.peerId);
+    if (dc && dc.readyState === 'open') {
+      dc.send(JSON.stringify({
+        type: 'call-decline',
+        by: profile.username
+      }));
+    }
+    addLog(`Declined call from ${incoming.callerName}`, "info");
+  };
+
+  const endCall = useCallback(() => {
+    stopRingChime();
+    setIncomingCall(null);
+
+    dataChannels.current.forEach(dc => {
+      if (dc.readyState === 'open') {
+        try {
+          dc.send(JSON.stringify({ type: 'call-end' }));
+        } catch (e) {}
+      }
+    });
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
     }
+    setLocalStream(null);
+
+    peerConnections.current.forEach(pc => {
+      pc.getSenders().forEach(sender => {
+        if (sender.track) {
+          try {
+            pc.removeTrack(sender);
+          } catch (e) {}
+        }
+      });
+    });
+
     setIsCallActive(false);
     setCallType(null);
+    setRemoteStreams({});
     addLog("Ended call", "info");
+  }, [addLog, stopRingChime]);
+
+  useEffect(() => {
+    endCallRef.current = endCall;
+  }, [endCall]);
+
+  const handleToggleTrack = (kind: 'audio' | 'video', enabled: boolean) => {
+    dataChannels.current.forEach(dc => {
+      if (dc.readyState === 'open') {
+        try {
+          dc.send(JSON.stringify({
+            type: 'call-track-state',
+            kind,
+            enabled,
+            from: profile.username
+          }));
+        } catch (e) {}
+      }
+    });
   };
 
   const sendMessage = (text: string, audioData?: string) => {
@@ -1720,9 +1950,17 @@ export default function App() {
       <CallOverlay 
         active={isCallActive}
         type={callType}
-        localStream={localStreamRef.current}
+        localStream={localStream || localStreamRef.current}
         remoteStreams={remoteStreams}
+        peerProfiles={peerProfiles}
         onEndCall={endCall}
+        onToggleTrack={handleToggleTrack}
+      />
+
+      <IncomingCallModal 
+        incomingCall={incomingCall}
+        onAccept={acceptCall}
+        onDecline={declineCall}
       />
     </div>
   );

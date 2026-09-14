@@ -86,14 +86,12 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
         <div className="flex items-center gap-3">
           {isConnected && (
             <div className="flex items-center gap-1 mr-2 border-r border-white/20 dark:border-white/10 pr-3">
-              <button onClick={() => startCall?.('audio')} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-muted hover:text-text cursor-pointer" title="Start Private Voice Call (Experimental)">
+              <button onClick={() => startCall?.('audio')} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-muted hover:text-text cursor-pointer" title="Start P2P Voice Call">
                 <Phone className="w-4 h-4" />
               </button>
-              {role === 'host' && (
-                <button onClick={() => startCall?.('video')} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-muted hover:text-text cursor-pointer" title="Start Group Video Call (Experimental)">
-                  <Video className="w-4 h-4" />
-                </button>
-              )}
+              <button onClick={() => startCall?.('video')} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-muted hover:text-text cursor-pointer" title="Start P2P Video Call">
+                <Video className="w-4 h-4" />
+              </button>
             </div>
           )}
           <div className="flex items-center gap-2 bg-white/40 dark:bg-transparent px-3 py-1 rounded-full border border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent ">
