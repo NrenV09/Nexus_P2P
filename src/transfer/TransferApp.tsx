@@ -432,6 +432,7 @@ export default function App() {
             setMessages(prev => [...prev, {
               id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
               text: data.text,
+              audioData: data.audioData,
               sender: 'them',
               senderName: data.senderName,
               senderColor: data.senderColor,
@@ -687,12 +688,13 @@ export default function App() {
     }
   };
 
-  const sendMessage = (text: string) => {
-    if (!text || dataChannels.current.size === 0) return;
+  const sendMessage = (text: string, audioData?: string) => {
+    if ((!text && !audioData) || dataChannels.current.size === 0) return;
     
     const msg = JSON.stringify({ 
       type: 'chat', 
-      text, 
+      text,
+      audioData,
       senderName: profile.username,
       senderColor: profile.avatarColor,
       senderId: profile.id
@@ -705,6 +707,7 @@ export default function App() {
     setMessages(prev => [...prev, {
       id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
       text,
+      audioData,
       sender: 'me',
       senderName: profile.username,
       senderColor: profile.avatarColor,

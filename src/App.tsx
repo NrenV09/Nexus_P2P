@@ -96,6 +96,7 @@ export default function App() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
+  const [peerTrackStates, setPeerTrackStates] = useState<Record<string, { video?: boolean; audio?: boolean }>>({});
   const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
   const ringtoneCtxRef = useRef<AudioContext | null>(null);
   const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -203,6 +204,7 @@ export default function App() {
   const localConnectionRef = useRef<RTCPeerConnection | null>(null);
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const dataChannels = useRef<Map<string, RTCDataChannel>>(new Map());
+  const chatChunkBuffers = useRef<Record<string, { chunks: (string | null)[]; count: number; total: number }>>({});
   const [peerProfiles, setPeerProfiles] = useState<Record<string, UserProfile>>({});
   const peerIdToProfileId = useRef<Map<string, string>>(new Map());
   const [connectedCount, setConnectedPeers] = useState(0);
@@ -534,14 +536,14 @@ export default function App() {
             }
           } else if (data.type === 'chat') {
             setMessages(prev => [...prev, {
-              id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
+              id: data.id || (Math.random().toString(36).substring(2) + Date.now().toString(36)),
               text: data.text,
               audioData: data.audioData,
               sender: 'them',
               senderName: data.senderName,
               senderColor: data.senderColor,
               senderId: data.senderId,
-              timestamp: new Date()
+              timestamp: data.timestamp ? new Date(data.timestamp) : new Date()
             }]);
             
             setUnreadChatCount(prev => activeTabRef.current !== 'chat' ? prev + 1 : 0);
@@ -551,6 +553,47 @@ export default function App() {
                   dc.send(event.data);
                 }
               });
+            }
+          } else if (data.type === 'chat-chunk') {
+            if (roleRef.current === 'host') {
+              dataChannels.current.forEach((dc, otherId) => {
+                if (otherId !== peerId && dc.readyState === 'open') {
+                  dc.send(event.data);
+                }
+              });
+            }
+            const { msgId, index, total, chunk } = data;
+            if (!chatChunkBuffers.current[msgId]) {
+              chatChunkBuffers.current[msgId] = {
+                chunks: new Array(total).fill(null),
+                count: 0,
+                total
+              };
+            }
+            const buffer = chatChunkBuffers.current[msgId];
+            if (buffer.chunks[index] === null) {
+              buffer.chunks[index] = chunk;
+              buffer.count++;
+            }
+            if (buffer.count === buffer.total) {
+              const fullJson = buffer.chunks.join('');
+              delete chatChunkBuffers.current[msgId];
+              try {
+                const fullData = JSON.parse(fullJson);
+                setMessages(prev => [...prev, {
+                  id: fullData.id || (Math.random().toString(36).substring(2) + Date.now().toString(36)),
+                  text: fullData.text,
+                  audioData: fullData.audioData,
+                  sender: 'them',
+                  senderName: fullData.senderName,
+                  senderColor: fullData.senderColor,
+                  senderId: fullData.senderId,
+                  timestamp: fullData.timestamp ? new Date(fullData.timestamp) : new Date()
+                }]);
+                setUnreadChatCount(prev => activeTabRef.current !== 'chat' ? prev + 1 : 0);
+              } catch (e) {
+                console.error("Failed to parse reassembled chat chunk:", e);
+              }
             }
           } else if (data.type === 'file-meta') {
             const bufferRef: any = { 
@@ -614,18 +657,34 @@ export default function App() {
           } else if (data.type === 'call-decline') {
             addLog(`Call declined by ${data.by || 'peer'}`, "err");
             endCallRef.current?.();
+          } else if (data.type === 'call-track-state') {
+            setPeerTrackStates(prev => ({
+              ...prev,
+              [peerId]: {
+                ...prev[peerId],
+                [data.kind]: data.enabled
+              }
+            }));
           } else if (data.type === 'call-end') {
             addLog("Call ended by peer", "info");
             stopRingChime();
             setIncomingCall(null);
             if (localStreamRef.current) {
+              if ((localStreamRef.current as any)._simTimer) {
+                clearInterval((localStreamRef.current as any)._simTimer);
+              }
               localStreamRef.current.getTracks().forEach(t => t.stop());
               localStreamRef.current = null;
             }
+            Object.values(remoteStreams).forEach((st: any) => {
+              if (st._simTimer) clearInterval(st._simTimer);
+              st.getTracks?.().forEach((t: any) => t.stop());
+            });
             setLocalStream(null);
             setIsCallActive(false);
             setCallType(null);
             setRemoteStreams({});
+            setPeerTrackStates({});
           } else if (data.type === 'ice-candidate') {
             const pc = peerConnections.current.get(peerId);
             if (pc && data.candidate) {
@@ -884,6 +943,32 @@ export default function App() {
     }
   };
 
+  const createSimStream = (label: string, color: string) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640; 
+    canvas.height = 480;
+    const ctx = canvas.getContext('2d');
+    let frame = 0;
+    const timer = setInterval(() => {
+      if (!ctx) return;
+      frame++;
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, 640, 480);
+      ctx.fillStyle = color;
+      ctx.font = 'bold 24px monospace';
+      ctx.fillText(label, 160, 220);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '16px monospace';
+      ctx.fillText(new Date().toLocaleTimeString(), 250, 260);
+      const pulse = Math.sin(frame / 6) * 30;
+      ctx.fillStyle = color;
+      ctx.fillRect(190, 290, 260 + pulse, 6);
+    }, 100);
+    const s = (canvas as any).captureStream(30);
+    (s as any)._simTimer = timer;
+    return s;
+  };
+
   const startCall = async (type: 'audio' | 'video') => {
     let stream: MediaStream;
     try {
@@ -893,18 +978,8 @@ export default function App() {
       });
     } catch (e) {
       if (isSimulation) {
-        addLog("Permission denied, using simulated stream", "info");
-        const canvas = document.createElement('canvas');
-        canvas.width = 640; canvas.height = 480;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#0f172a';
-          ctx.fillRect(0, 0, 640, 480);
-          ctx.fillStyle = '#ef4444';
-          ctx.font = '24px monospace';
-          ctx.fillText('SIMULATION STREAM', 180, 240);
-        }
-        stream = (canvas as any).captureStream(30);
+        addLog("Permission denied or preview mode, using simulated live stream", "info");
+        stream = createSimStream('SIMULATED LOCAL STREAM', '#38bdf8');
       } else {
         addLog(`Could not access camera/microphone: ${(e as any)?.message || e}`, "err");
         return;
@@ -920,18 +995,7 @@ export default function App() {
     if (isSimulation) {
       const fakeStreams: Record<string, MediaStream> = {};
       if (type === 'video') {
-        const canvas = document.createElement('canvas');
-        canvas.width = 640; canvas.height = 480;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#1e293b';
-          ctx.fillRect(0, 0, 640, 480);
-          ctx.fillStyle = '#94a3b8';
-          ctx.font = '24px monospace';
-          ctx.fillText('Simulated Peer Video', 180, 240);
-        }
-        const canvasStream = (canvas as any).captureStream(30);
-        fakeStreams['sim_peer_1'] = canvasStream;
+        fakeStreams['sim_peer_1'] = createSimStream('Simulated Peer Video', '#34d399');
       } else {
         const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContext) {
@@ -988,17 +1052,7 @@ export default function App() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       } catch {
-        const canvas = document.createElement('canvas');
-        canvas.width = 640; canvas.height = 480;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#1e293b';
-          ctx.fillRect(0, 0, 640, 480);
-          ctx.fillStyle = '#94a3b8';
-          ctx.font = '24px monospace';
-          ctx.fillText('NO CAMERA/MIC ACCESS', 170, 240);
-        }
-        stream = (canvas as any).captureStream(10);
+        stream = createSimStream('Joined Stream', '#38bdf8');
       }
     }
 
@@ -1060,10 +1114,18 @@ export default function App() {
     });
 
     if (localStreamRef.current) {
+      if ((localStreamRef.current as any)._simTimer) {
+        clearInterval((localStreamRef.current as any)._simTimer);
+      }
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
     }
     setLocalStream(null);
+
+    Object.values(remoteStreams).forEach((st: any) => {
+      if (st._simTimer) clearInterval(st._simTimer);
+      st.getTracks?.().forEach((t: any) => t.stop());
+    });
 
     peerConnections.current.forEach(pc => {
       pc.getSenders().forEach(sender => {
@@ -1078,8 +1140,9 @@ export default function App() {
     setIsCallActive(false);
     setCallType(null);
     setRemoteStreams({});
+    setPeerTrackStates({});
     addLog("Ended call", "info");
-  }, [addLog, stopRingChime]);
+  }, [addLog, stopRingChime, remoteStreams]);
 
   useEffect(() => {
     endCallRef.current = endCall;
@@ -1100,24 +1163,76 @@ export default function App() {
     });
   };
 
+  const handleAddTrack = async (track: MediaStreamTrack) => {
+    setCallType('video');
+    peerConnections.current.forEach(pc => {
+      if (localStreamRef.current) {
+        if (!pc.getSenders().find(s => s.track === track)) {
+          pc.addTrack(track, localStreamRef.current);
+        }
+      }
+    });
+
+    peerConnections.current.forEach(async (pc, peerId) => {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await waitForIce(pc);
+        const dc = dataChannels.current.get(peerId);
+        if (dc && dc.readyState === 'open') {
+          dc.send(JSON.stringify({ type: 'media-offer', sdp: pc.localDescription }));
+        }
+      } catch (e) {
+        console.error("Renegotiation failed:", e);
+      }
+    });
+  };
+
   const sendMessage = (text: string, audioData?: string) => {
     if ((!text && !audioData) || dataChannels.current.size === 0) return;
     
-    const msg = JSON.stringify({ 
+    const messageId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const msgObj = { 
       type: 'chat', 
+      id: messageId,
       text,
       audioData,
       senderName: profile.username,
       senderColor: profile.avatarColor,
-      senderId: profile.id
-    });
+      senderId: profile.id,
+      timestamp: new Date().toISOString()
+    };
+    const fullMsg = JSON.stringify(msgObj);
     
-    dataChannels.current.forEach(dc => {
-      if (dc.readyState === 'open') dc.send(msg);
-    });
+    // WebRTC safe chunking threshold (32KB chunks prevent SCTP buffer overflow)
+    const CHUNK_SIZE_LIMIT = 32000;
+    if (fullMsg.length > CHUNK_SIZE_LIMIT) {
+      const total = Math.ceil(fullMsg.length / CHUNK_SIZE_LIMIT);
+      for (let i = 0; i < total; i++) {
+        const slice = fullMsg.slice(i * CHUNK_SIZE_LIMIT, (i + 1) * CHUNK_SIZE_LIMIT);
+        const chunkPayload = JSON.stringify({
+          type: 'chat-chunk',
+          msgId: messageId,
+          index: i,
+          total,
+          chunk: slice
+        });
+        dataChannels.current.forEach(dc => {
+          if (dc.readyState === 'open') {
+            try { dc.send(chunkPayload); } catch (e) { console.error("DC chunk send error:", e); }
+          }
+        });
+      }
+    } else {
+      dataChannels.current.forEach(dc => {
+        if (dc.readyState === 'open') {
+          try { dc.send(fullMsg); } catch (e) { console.error("DC send error:", e); }
+        }
+      });
+    }
     
     setMessages(prev => [...prev, {
-      id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
+      id: messageId,
       text,
       audioData,
       sender: 'me',
@@ -1131,7 +1246,8 @@ export default function App() {
       setTimeout(() => {
         setMessages(prev => [...prev, {
           id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
-          text: audioData ? "🎙️ [Simulated Voice Reply]" : "Simulated reply to: " + text,
+          text: audioData ? "🎙️ [Simulated Voice Note Received]" : "Simulated reply to: " + text,
+          audioData: audioData ? audioData : undefined,
           sender: 'them',
           senderName: 'Alpha (Sim)',
           senderColor: 'bg-blue-500',
@@ -1139,7 +1255,7 @@ export default function App() {
           timestamp: new Date()
         }]);
         setUnreadChatCount(prev => activeTabRef.current !== 'chat' ? prev + 1 : 0);
-      }, 1500);
+      }, 1200);
     }
   };
 
@@ -1953,8 +2069,10 @@ export default function App() {
         localStream={localStream || localStreamRef.current}
         remoteStreams={remoteStreams}
         peerProfiles={peerProfiles}
+        peerTrackStates={peerTrackStates}
         onEndCall={endCall}
         onToggleTrack={handleToggleTrack}
+        onRequestAddTrack={handleAddTrack}
       />
 
       <IncomingCallModal 

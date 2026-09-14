@@ -22,16 +22,20 @@ export function CallOverlay({
   localStream,
   remoteStreams,
   peerProfiles,
+  peerTrackStates,
   onEndCall,
-  onToggleTrack
+  onToggleTrack,
+  onRequestAddTrack
 }: {
   active: boolean;
   type: 'audio' | 'video' | null;
   localStream: MediaStream | null;
   remoteStreams: Record<string, MediaStream>;
   peerProfiles?: Record<string, UserProfile>;
+  peerTrackStates?: Record<string, { video?: boolean; audio?: boolean }>;
   onEndCall: () => void;
   onToggleTrack?: (kind: 'audio' | 'video', enabled: boolean) => void;
+  onRequestAddTrack?: (track: MediaStreamTrack) => void;
 }) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const [isMicMuted, setIsMicMuted] = useState(false);
@@ -43,40 +47,69 @@ export function CallOverlay({
     return () => clearInterval(timer);
   }, []);
 
+  const hasActiveVideoTrack = localStream 
+    ? localStream.getVideoTracks().some(t => t.readyState === 'live')
+    : false;
+
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-      localVideoRef.current.play().catch(e => console.warn("Local preview play error:", e));
+      if (localVideoRef.current.srcObject !== localStream) {
+        localVideoRef.current.srcObject = localStream;
+      }
+      if (!isVideoOff) {
+        localVideoRef.current.play().catch(e => console.warn("Local preview play error:", e));
+      }
     }
-  }, [localStream, active]);
+  }, [localStream, active, isVideoOff]);
 
   useEffect(() => {
     setIsVideoOff(type === 'audio');
   }, [type]);
 
   const toggleMic = () => {
-    if (localStream) {
-      const audioTracks = localStream.getAudioTracks();
-      const newEnabled = isMicMuted; // toggling from muted to unmuted
-      audioTracks.forEach(track => {
-        track.enabled = newEnabled;
-      });
-      setIsMicMuted(!newEnabled);
-      onToggleTrack?.('audio', newEnabled);
-    }
+    if (!localStream) return;
+    const audioTracks = localStream.getAudioTracks();
+    const nextState = !isMicMuted;
+    const newEnabled = !nextState;
+    audioTracks.forEach(track => {
+      track.enabled = newEnabled;
+    });
+    setIsMicMuted(nextState);
+    onToggleTrack?.('audio', newEnabled);
   };
 
-  const toggleVideo = () => {
-    if (type === 'audio') return;
-    if (localStream) {
-      const videoTracks = localStream.getVideoTracks();
-      const newEnabled = isVideoOff; // toggling from off to on
-      videoTracks.forEach(track => {
-        track.enabled = newEnabled;
-      });
-      setIsVideoOff(!newEnabled);
-      onToggleTrack?.('video', newEnabled);
+  const toggleVideo = async () => {
+    if (!localStream) return;
+    const videoTracks = localStream.getVideoTracks();
+
+    // If no video tracks currently exist (e.g. started as audio call)
+    if (videoTracks.length === 0) {
+      try {
+        const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const newTrack = camStream.getVideoTracks()[0];
+        if (newTrack) {
+          localStream.addTrack(newTrack);
+          setIsVideoOff(false);
+          onRequestAddTrack?.(newTrack);
+          onToggleTrack?.('video', true);
+        }
+      } catch (err) {
+        console.warn("Could not acquire camera track:", err);
+      }
+      return;
     }
+
+    const nextState = !isVideoOff;
+    const newEnabled = !nextState;
+    videoTracks.forEach(track => {
+      track.enabled = newEnabled;
+    });
+    setIsVideoOff(nextState);
+
+    if (newEnabled && localVideoRef.current) {
+      localVideoRef.current.play().catch(e => console.warn("Local preview play error:", e));
+    }
+    onToggleTrack?.('video', newEnabled);
   };
 
   // Google Meet layout logic
@@ -103,24 +136,32 @@ export function CallOverlay({
               
               {/* Local Participant Tile */}
               <div className="relative group bg-[#3c4043] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex items-center justify-center border border-white/10">
-                {(type === 'audio' || isVideoOff || !localStream?.getVideoTracks().length) ? (
+                {/* Keep video element permanently mounted to prevent decoder pipeline restart */}
+                <video 
+                  ref={localVideoRef}
+                  autoPlay 
+                  playsInline 
+                  muted 
+                  className={cn(
+                    "w-full h-full object-cover transform -scale-x-100 transition-opacity duration-150",
+                    (isVideoOff || !hasActiveVideoTrack) ? "opacity-0 pointer-events-none absolute inset-0" : "opacity-100"
+                  )}
+                />
+
+                {/* Avatar Fallback for audio or camera off */}
+                {(isVideoOff || !hasActiveVideoTrack) && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#28292c]">
                     <div className="w-24 h-24 rounded-full bg-blue-600/30 border-2 border-blue-400/40 flex items-center justify-center text-3xl text-blue-200 font-bold uppercase shadow-inner">
                       You
                     </div>
+                    {isVideoOff && (
+                      <span className="text-xs text-white/50 mt-2 font-medium">Camera is off</span>
+                    )}
                   </div>
-                ) : (
-                  <video 
-                    ref={localVideoRef}
-                    autoPlay 
-                    playsInline 
-                    muted 
-                    className="w-full h-full object-cover transform -scale-x-100"
-                  />
                 )}
                 
                 {/* Overlay Name & Status */}
-                <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white shadow">
+                <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white shadow z-10">
                   {isMicMuted ? (
                     <MicOff className="w-3.5 h-3.5 text-red-400" />
                   ) : (
@@ -134,13 +175,15 @@ export function CallOverlay({
               {remoteEntries.map(([id, stream]) => {
                 const profile = peerProfiles?.[id];
                 const name = profile?.username || 'Remote Peer';
+                const trackState = peerTrackStates?.[id];
                 return (
                   <StreamView 
                     key={id} 
                     id={id} 
                     name={name}
                     stream={stream} 
-                    type={type} 
+                    isRemoteVideoOff={trackState?.video === false || (type === 'audio' && trackState?.video !== true)}
+                    isRemoteAudioMuted={trackState?.audio === false}
                   />
                 );
               })}
@@ -195,14 +238,13 @@ export function CallOverlay({
                 onClick={toggleVideo}
                 className={cn(
                   "w-12 h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
-                  (isVideoOff || type === 'audio')
+                  (isVideoOff || !hasActiveVideoTrack)
                     ? "bg-[#ea4335] text-white hover:bg-[#d93025]" 
                     : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
                 )}
-                disabled={type === 'audio'}
                 title={isVideoOff ? "Turn on camera" : "Turn off camera"}
               >
-                {(isVideoOff || type === 'audio') ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                {(isVideoOff || !hasActiveVideoTrack) ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
               </button>
 
               {/* End Call Button */}
@@ -231,80 +273,93 @@ export function CallOverlay({
 
 function StreamView({ 
   stream, 
-  type, 
   id, 
-  name 
+  name,
+  isRemoteVideoOff,
+  isRemoteAudioMuted
 }: { 
   key?: string;
   stream: MediaStream; 
-  type: 'audio' | 'video' | null; 
   id: string; 
   name: string; 
+  isRemoteVideoOff?: boolean;
+  isRemoteAudioMuted?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [hasVideoTrack, setHasVideoTrack] = useState(false);
 
   useEffect(() => {
-    const updateTracks = () => {
+    const checkTracks = () => {
       const vTracks = stream.getVideoTracks();
-      const aTracks = stream.getAudioTracks();
-      const vActive = vTracks.length > 0 && vTracks.some(t => t.readyState === 'live' && t.enabled);
-      setHasVideoTrack(vActive);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(e => console.warn("Video playback prevented:", e));
-      }
-      if (audioRef.current) {
-        audioRef.current.srcObject = stream;
-        audioRef.current.play().catch(e => console.warn("Audio playback prevented:", e));
-      }
+      const hasLive = vTracks.length > 0 && vTracks.some(t => t.readyState === 'live');
+      setHasVideoTrack(hasLive);
     };
 
-    updateTracks();
+    checkTracks();
+    stream.addEventListener('addtrack', checkTracks);
+    stream.addEventListener('removetrack', checkTracks);
 
-    stream.addEventListener('addtrack', updateTracks);
-    stream.addEventListener('removetrack', updateTracks);
-    const interval = setInterval(updateTracks, 1000);
+    if (videoRef.current && videoRef.current.srcObject !== stream) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(e => console.warn("Remote video play error:", e));
+    }
+    if (audioRef.current && audioRef.current.srcObject !== stream) {
+      audioRef.current.srcObject = stream;
+      audioRef.current.play().catch(e => console.warn("Remote audio play error:", e));
+    }
 
     return () => {
-      clearInterval(interval);
-      stream.removeEventListener('addtrack', updateTracks);
-      stream.removeEventListener('removetrack', updateTracks);
+      stream.removeEventListener('addtrack', checkTracks);
+      stream.removeEventListener('removetrack', checkTracks);
     };
   }, [stream]);
 
+  // When remote video is toggled back on, ensure playback resumes smoothly
+  useEffect(() => {
+    if (!isRemoteVideoOff && videoRef.current && hasVideoTrack) {
+      videoRef.current.play().catch(e => console.warn("Remote video resume play error:", e));
+    }
+  }, [isRemoteVideoOff, hasVideoTrack]);
+
   const initials = (name || id || "Peer").substring(0, 2).toUpperCase();
+  const showVideo = hasVideoTrack && !isRemoteVideoOff;
 
   return (
     <div className="relative group bg-[#3c4043] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex items-center justify-center border border-white/10">
       {/* Dedicated audio element to guarantee remote audio plays even if video is paused */}
       <audio ref={audioRef} autoPlay playsInline />
 
-      {/* Video Element */}
+      {/* Video Element kept permanently mounted */}
       <video 
         ref={videoRef} 
         autoPlay 
         playsInline 
         className={cn(
-          "w-full h-full object-cover",
-          (!hasVideoTrack || type === 'audio') && "invisible absolute pointer-events-none"
+          "w-full h-full object-cover transition-opacity duration-150",
+          !showVideo ? "opacity-0 pointer-events-none absolute inset-0" : "opacity-100"
         )}
       />
 
       {/* Avatar Fallback for audio calls or when camera is off */}
-      {(!hasVideoTrack || type === 'audio') && (
+      {!showVideo && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#28292c]">
           <div className="w-24 h-24 rounded-full bg-emerald-600/30 border-2 border-emerald-400/40 flex items-center justify-center text-3xl text-emerald-200 font-bold uppercase shadow-inner">
             {initials}
           </div>
+          {isRemoteVideoOff && (
+            <p className="text-xs text-white/50 mt-2 font-medium">Camera turned off</p>
+          )}
         </div>
       )}
 
       {/* Participant Name Badge */}
-      <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white shadow">
-        <Volume2 className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+      <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white shadow z-10">
+        {isRemoteAudioMuted ? (
+          <MicOff className="w-3.5 h-3.5 text-red-400" />
+        ) : (
+          <Volume2 className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+        )}
         <span>{name}</span>
       </div>
     </div>
