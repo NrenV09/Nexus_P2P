@@ -108,6 +108,19 @@ html.dark button:not(.bg-accent):not(.bg-success):not(.bg-red-500):not(.bg-red-5
     100% { top: 110%; opacity: 0; }
   }
 
+  @keyframes typing {
+    from { width: 0 }
+    to { width: 100% }
+  }
+  @keyframes blink-caret {
+    from, to { border-color: transparent }
+    50% { border-color: #22c55e }
+  }
+  .animate-typing {
+    animation: typing 2.5s steps(40, end), blink-caret .75s step-end infinite;
+    display: inline-block;
+  }
+
   .fade-transition {
     animation: fade-in 0.3s ease-out both;
   }

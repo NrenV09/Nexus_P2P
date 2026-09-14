@@ -44,6 +44,7 @@ import { PacketTransferAnimation } from './components/PacketTransferAnimation';
 import { ProfileModal } from './components/ProfileModal';
 import { ViewProfileModal } from './components/ViewProfileModal';
 import { NexusFailoverHUD } from './components/NexusFailoverHUD';
+import { CallOverlay } from './components/CallOverlay';
 import { generateRandomName } from './lib/nameGenerator';
 
 const CHUNK_SIZE = 131072; // Max WebRTC chunk size (128KB)
@@ -78,12 +79,21 @@ export default function App() {
   
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [selectedPeerProfile, setSelectedPeerProfile] = useState<UserProfile | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("p2p");
+  const [activeTab, setActiveTabState] = useState<string>("p2p");
+  const activeTabRef = useRef<string>("p2p");
+
+  const setActiveTab = useCallback((tab: string) => {
+    setActiveTabState(tab);
+    activeTabRef.current = tab;
+  }, []);
   const [role, setRole] = useState<NodeRole>(null);
   const [status, setStatus] = useState<ConnectionStatus>("offline");
   const [isTransferring, setIsTransferring] = useState(false);
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
   const [files, setFiles] = useState<FilePayload[]>([]);
   const [transfer, setTransfer] = useState<TransferProgress | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -94,6 +104,26 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState<FilePayload | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isSimulation, setIsSimulation] = useState(false);
+  const [showSimWarning, setShowSimWarning] = useState(false);
+  const [showFailoverMenu, setShowFailoverMenu] = useState(false);
+  const [showCreatorPopup, setShowCreatorPopup] = useState(false);
+  const [titleTapCount, setTitleTapCount] = useState(0);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleTitleClick = useCallback(() => {
+    setTitleTapCount(prev => {
+      const next = prev + 1;
+      if (next >= 10) {
+        setShowCreatorPopup(true);
+        return 0;
+      }
+      return next;
+    });
+    if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
+    tapTimeoutRef.current = setTimeout(() => setTitleTapCount(0), 1000);
+  }, []);
 
   // --- Refs ---
   const cancelTransferRef = useRef(false);
@@ -129,6 +159,19 @@ export default function App() {
   const fileBuffers = useRef<Map<string, any>>(new Map());
   const lastUpdateRef = useRef<number>(Date.now());
 
+  const [directDownloads, setDirectDownloads] = useState(false);
+  const handleClearCache = useCallback(async () => {
+    try {
+      const cacheKeys = await caches.keys();
+      for (const key of cacheKeys) {
+        await caches.delete(key);
+      }
+      addLog("Browser cache cleared successfully", "ok");
+    } catch (e) {
+      addLog("Failed to clear cache", "err");
+    }
+  }, [addLog]);
+
   const [autoDownload, setAutoDownloadState] = useState(true);
   const autoDownloadRef = useRef(true);
   const setAutoDownload = (val: boolean) => {
@@ -161,10 +204,15 @@ export default function App() {
     addLog("All connections reset", "info");
   }, [addLog]);
 
-  const toggleSimulation = useCallback(() => {
+  const toggleSimulation = useCallback((force = false) => {
+    if (!isSimulation && status === "connected" && !force) {
+      setShowSimWarning(true);
+      return;
+    }
     if (isSimulation) {
       resetAll();
     } else {
+      setShowSimWarning(false);
       resetAll();
       setIsSimulation(true);
       setStatus("connected");
@@ -322,7 +370,7 @@ export default function App() {
       peerConnections.current.delete(peerId);
     };
 
-    channel.onmessage = (event) => {
+    channel.onmessage = async (event) => {
       if (typeof event.data === 'string') {
         try {
           const data = JSON.parse(event.data);
@@ -438,12 +486,15 @@ export default function App() {
             setMessages(prev => [...prev, {
               id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
               text: data.text,
+              audioData: data.audioData,
               sender: 'them',
               senderName: data.senderName,
               senderColor: data.senderColor,
               senderId: data.senderId,
               timestamp: new Date()
             }]);
+            
+            setUnreadChatCount(prev => activeTabRef.current !== 'chat' ? prev + 1 : 0);
             if (roleRef.current === 'host') {
               dataChannels.current.forEach((dc, otherId) => {
                 if (otherId !== peerId && dc.readyState === 'open') {
@@ -490,6 +541,22 @@ export default function App() {
                   dc.send(event.data);
                 }
               });
+            }
+          } else if (data.type === 'media-offer') {
+            const pc = peerConnections.current.get(peerId);
+            if (pc) {
+              await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              const dc = dataChannels.current.get(peerId);
+              if (dc && dc.readyState === 'open') {
+                dc.send(JSON.stringify({ type: 'media-answer', sdp: pc.localDescription }));
+              }
+            }
+          } else if (data.type === 'media-answer') {
+            const pc = peerConnections.current.get(peerId);
+            if (pc) {
+              await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
             }
           }
         } catch (e) {
@@ -599,6 +666,32 @@ export default function App() {
     };
 
     pc.ondatachannel = (event) => setupDataChannel(event.channel, id);
+    pc.onnegotiationneeded = async () => {
+      try {
+        if (pc.signalingState !== 'stable') return;
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        const dc = dataChannels.current.get(id);
+        if (dc && dc.readyState === 'open') {
+          dc.send(JSON.stringify({ type: 'media-offer', sdp: pc.localDescription }));
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    pc.ontrack = (event) => {
+      setRemoteStreams(prev => {
+        const existing = prev[id] || new MediaStream();
+        event.streams[0]?.getTracks().forEach(track => {
+          if (!existing.getTracks().includes(track)) {
+             existing.addTrack(track);
+          }
+        });
+        return { ...prev, [id]: existing };
+      });
+    };
+
     localConnectionRef.current = pc;
     return pc;
   }, [setupDataChannel]);
@@ -693,12 +786,97 @@ export default function App() {
     }
   };
 
-  const sendMessage = (text: string) => {
-    if (!text || dataChannels.current.size === 0) return;
+  const startCall = async (type: 'audio' | 'video') => {
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: type === 'video'
+      });
+    } catch (e) {
+      if (isSimulation) {
+        addLog("Permission denied, using fake stream for simulation", "info");
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, 640, 480);
+          ctx.fillStyle = '#ef4444';
+          ctx.font = '24px monospace';
+          ctx.fillText('NO CAMERA/MIC ACCESS', 150, 240);
+        }
+        stream = (canvas as any).captureStream(30);
+      } else {
+        addLog(`Failed to start ${type} call`, "err");
+        console.error(e);
+        return;
+      }
+    }
+
+    localStreamRef.current = stream;
+    setCallType(type);
+    setIsCallActive(true);
+    addLog(`Started ${type} call`, "ok");
+    
+    if (isSimulation) {
+      const fakeStreams: Record<string, MediaStream> = {};
+      
+      if (type === 'video') {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#1e293b';
+          ctx.fillRect(0, 0, 640, 480);
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '24px monospace';
+          ctx.fillText('Simulated Video Stream', 150, 240);
+        }
+        const canvasStream = (canvas as any).captureStream(30);
+        fakeStreams['sim_peer_1'] = canvasStream;
+        fakeStreams['sim_peer_2'] = canvasStream;
+      } else {
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContext) {
+          const audioCtx = new AudioContext();
+          const dest = audioCtx.createMediaStreamDestination();
+          fakeStreams['sim_peer_1'] = dest.stream;
+        } else {
+          fakeStreams['sim_peer_1'] = new MediaStream();
+        }
+      }
+      
+      setRemoteStreams(fakeStreams);
+      return;
+    }
+
+      peerConnections.current.forEach(pc => {
+        stream.getTracks().forEach(track => {
+          if (!pc.getSenders().find(s => s.track === track)) {
+            pc.addTrack(track, stream);
+          }
+        });
+      });
+  };
+
+  const endCall = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+    }
+    setIsCallActive(false);
+    setCallType(null);
+    addLog("Ended call", "info");
+  };
+
+  const sendMessage = (text: string, audioData?: string) => {
+    if ((!text && !audioData) || dataChannels.current.size === 0) return;
     
     const msg = JSON.stringify({ 
       type: 'chat', 
-      text, 
+      text,
+      audioData,
       senderName: profile.username,
       senderColor: profile.avatarColor,
       senderId: profile.id
@@ -711,12 +889,28 @@ export default function App() {
     setMessages(prev => [...prev, {
       id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
       text,
+      audioData,
       sender: 'me',
       senderName: profile.username,
       senderColor: profile.avatarColor,
       senderId: profile.id,
       timestamp: new Date()
     }]);
+
+    if (isSimulation) {
+      setTimeout(() => {
+        setMessages(prev => [...prev, {
+          id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
+          text: audioData ? "🎙️ [Simulated Voice Reply]" : "Simulated reply to: " + text,
+          sender: 'them',
+          senderName: 'Alpha (Sim)',
+          senderColor: 'bg-blue-500',
+          senderId: 'sim_peer_1',
+          timestamp: new Date()
+        }]);
+        setUnreadChatCount(prev => activeTabRef.current !== 'chat' ? prev + 1 : 0);
+      }, 1500);
+    }
   };
 
   const sendFile = async (file: File) => {
@@ -850,7 +1044,7 @@ export default function App() {
           >
             <RefreshCw className={cn("w-4 h-4 lg:w-5 lg:h-5", isSimulation && "animate-spin")} />
           </button>
-          <div className="min-w-0">
+          <div className="min-w-0 cursor-pointer select-none" onClick={handleTitleClick}>
             <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap">
               <span className="hidden sm:inline">Quantum Link</span>
               <span className="sm:hidden">Q-Link</span>
@@ -880,16 +1074,6 @@ export default function App() {
               Transceiver
             </button>
             <button 
-              onClick={() => { setActiveTab("failover"); addLog("Opening Nexus Mesh Failover HUD", "info"); }}
-              className={cn(
-                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap flex items-center gap-1.5",
-                activeTab === "failover" ? "bg-white dark:bg-transparent text-accent shadow-sm" : "text-muted hover:text-text cursor-pointer"
-              )}
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-accent" />
-              Nexus Failover
-            </button>
-            <button 
               onClick={() => { setActiveTab("qr"); addLog("Entering QR Utility", "info"); }}
               className={cn(
                 "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap",
@@ -899,13 +1083,21 @@ export default function App() {
               QR Utility
             </button>
             <button 
-              onClick={() => setActiveTab("chat")}
+              onClick={() => { setActiveTab("chat"); setUnreadChatCount(0); }}
               className={cn(
-                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap",
+                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap relative",
                 activeTab === "chat" ? "bg-white dark:bg-transparent text-text shadow-sm" : "text-muted hover:text-text cursor-pointer"
               )}
             >
               Secure Chat
+              {unreadChatCount > 0 && activeTab !== "chat" && (
+                <span className="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full">
+                  {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                </span>
+              )}
+              {isCallActive && (
+                <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center w-3 h-3 bg-accent animate-pulse rounded-full shadow-md border border-white" />
+              )}
             </button>
             <button 
               onClick={() => setActiveTab("base64")}
@@ -946,29 +1138,7 @@ export default function App() {
       {/* Main Area */}
       <main className="z-10 flex-1 p-2.5 sm:p-4 md:p-6 overflow-hidden">
         <AnimatePresence mode="wait">
-          {activeTab === "failover" ? (
-            <motion.div 
-              key="failover" 
-              initial={{ opacity: 0, y: 15, filter: "blur(4px)" }} 
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} 
-              exit={{ opacity: 0, y: -15, filter: "blur(4px)" }} 
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="h-full w-full"
-            >
-              <NexusFailoverHUD 
-                localUsername={profile.username}
-                localAvatarColor={profile.avatarColor}
-                localPeerId={profile.id}
-                realConnectedCount={connectedCount}
-                peerProfiles={peerProfiles}
-                role={role}
-                networkStatus={status}
-                isSimulation={isSimulation}
-                onToggleSimulation={toggleSimulation}
-                onNavigateToConnect={() => setActiveTab(role ? "chat" : "qr")}
-              />
-            </motion.div>
-          ) : activeTab === "qr" ? (
+          {activeTab === "qr" ? (
             <motion.div 
               key="qr" 
               initial={{ opacity: 0, y: 15, filter: "blur(4px)" }} 
@@ -997,6 +1167,7 @@ export default function App() {
                   const p = peerProfiles[senderId];
                   if (p) setSelectedPeerProfile(p);
                 }}
+                startCall={startCall}
               />
             </motion.div>
           ) : activeTab === "base64" ? (
@@ -1244,16 +1415,30 @@ export default function App() {
                     </div>
 
                     <div className="flex-1 p-5 overflow-hidden flex flex-col">
-                      <div className="flex justify-end mb-2">
-                        <label className="flex items-center gap-2 text-xs text-muted cursor-pointer hover:text-text transition-colors">
-                          <input 
-                            type="checkbox" 
-                            checked={autoDownload} 
-                            onChange={(e) => setAutoDownload(e.target.checked)} 
-                            className="rounded border-white/20 bg-transparent text-accent focus:ring-accent"
-                          />
-                          Auto-download files
-                        </label>
+                      <div className="flex flex-wrap items-center justify-between mb-2 gap-2">
+                        <button onClick={handleClearCache} className="px-3 py-1 rounded bg-white/20 dark:bg-white/5 border border-white/30 dark:border-white/10 hover:bg-white/30 dark:hover:bg-white/10 transition-colors text-text shadow-sm cursor-pointer text-xs font-medium">
+                          Clear App Caches
+                        </button>
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer hover:text-text transition-colors">
+                            <input 
+                              type="checkbox" 
+                              checked={directDownloads} 
+                              onChange={(e) => setDirectDownloads(e.target.checked)} 
+                              className="rounded border-white/20 bg-transparent text-accent focus:ring-accent"
+                            />
+                            Direct Downloads (Bypass RAM Limits)
+                          </label>
+                          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer hover:text-text transition-colors">
+                            <input 
+                              type="checkbox" 
+                              checked={autoDownload} 
+                              onChange={(e) => setAutoDownload(e.target.checked)} 
+                              className="rounded border-white/20 bg-transparent text-accent focus:ring-accent"
+                            />
+                            Auto-download files
+                          </label>
+                        </div>
                       </div>
                       <div 
                         onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true); }}
@@ -1325,8 +1510,17 @@ export default function App() {
 
                   {/* Signal Feed */}
                   <div className="w-full lg:w-72 flex-shrink-0 glass-panel flex flex-col min-h-[350px] lg:min-h-0">
-                    <div className="p-4 border-b border-white/30 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/20 dark:bg-transparent backdrop-blur-md sticky top-0 z-10 flex-shrink-0 rounded-t-3xl">
+                    <div className="p-4 border-b border-white/30 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/20 dark:bg-transparent backdrop-blur-md sticky top-0 z-10 flex-shrink-0 rounded-t-3xl flex justify-between items-center">
                       <span className="text-sm font-semibold text-text">Activity Log</span>
+                      {role === 'host' && (
+                        <button
+                          onClick={() => setShowFailoverMenu(true)}
+                          className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors bg-accent/10 border border-accent/20 shadow-sm"
+                          title="Nexus Failover Settings"
+                        >
+                          <ShieldCheck className="w-4 h-4 text-accent" />
+                        </button>
+                      )}
                     </div>
                     <div className="flex-1 p-4 text-[13px] overflow-y-auto scrollbar-hide flex flex-col gap-2 relative">
                       {[...logs, ...messages.filter(m => m.sender !== 'system').map(m => ({ 
@@ -1443,6 +1637,93 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {showFailoverMenu && role === 'host' && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-6 lg:p-8 bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="w-full max-w-6xl h-full md:h-[90vh] flex flex-col bg-background/95 md:rounded-3xl border border-white/10 shadow-2xl overflow-hidden relative"
+            >
+              <div className="flex justify-between items-center p-4 border-b border-white/10">
+                <h2 className="text-lg font-bold flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-accent"/> Nexus Failover Control</h2>
+                <button onClick={() => setShowFailoverMenu(false)} className="p-2 rounded-full hover:bg-white/10 transition cursor-pointer">
+                  <X className="w-5 h-5 text-muted" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden relative p-2 md:p-0">
+                <NexusFailoverHUD 
+                  localUsername={profile.username}
+                  localAvatarColor={profile.avatarColor}
+                  localPeerId={profile.id}
+                  realConnectedCount={connectedCount}
+                  peerProfiles={peerProfiles}
+                  role={role}
+                  networkStatus={status}
+                  isSimulation={isSimulation}
+                  onToggleSimulation={toggleSimulation}
+                  onNavigateToConnect={() => { setShowFailoverMenu(false); setActiveTab(role ? "chat" : "qr"); }}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {showSimWarning && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <div className="bg-background max-w-md p-6 rounded-3xl border border-accent/30 shadow-2xl">
+              <h3 className="text-xl font-bold mb-3 flex items-center gap-2"><RefreshCw className="text-accent w-6 h-6"/> Enable Simulation Mode?</h3>
+              <p className="text-muted text-sm mb-6">Are you sure you wanna enable simulation mode? This will disconnect existing tunnel(s).</p>
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowSimWarning(false)} className="px-5 py-2 rounded-xl text-sm font-semibold hover:bg-white/10 transition cursor-pointer">Cancel</button>
+                <button onClick={() => toggleSimulation(true)} className="px-5 py-2 rounded-xl text-sm font-semibold bg-accent text-white hover:bg-accent/90 transition cursor-pointer shadow-md">Enable</button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {showCreatorPopup && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+              className="bg-black/90 p-8 rounded-xl border-2 border-green-500/50 shadow-[0_0_30px_rgba(34,197,94,0.3)] relative"
+            >
+              <button onClick={() => setShowCreatorPopup(false)} className="absolute top-2 right-2 p-1 text-green-500 hover:text-white cursor-pointer transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+              <div className="text-green-400 font-mono text-lg flex flex-col items-center">
+                <div className="w-12 h-12 mb-4 border-2 border-green-500 rounded-full flex items-center justify-center animate-pulse">
+                  <span className="text-2xl font-bold text-green-500">Q</span>
+                </div>
+                <div className="overflow-hidden whitespace-nowrap border-r-2 border-green-500 pr-1 animate-typing">
+                  Created By Naman Verma as a fun project
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <CallOverlay 
+        active={isCallActive}
+        type={callType}
+        localStream={localStreamRef.current}
+        remoteStreams={remoteStreams}
+        onEndCall={endCall}
+      />
     </div>
   );
 }

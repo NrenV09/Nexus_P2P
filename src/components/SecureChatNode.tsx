@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, Users, Send } from 'lucide-react';
+import { Shield, Users, Send, Video, Phone, Mic, PhoneOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ChatMessage, NodeRole } from '../types';
 
 interface SecureChatNodeProps {
   messages: ChatMessage[];
-  sendMessage: (text: string) => void;
+  sendMessage: (text: string, audioData?: string) => void;
   connectedPeers: number;
   role: NodeRole;
   onClickProfile?: (senderId: string) => void;
+  startCall?: (type: 'audio' | 'video') => void;
 }
 
 export const SecureChatNode: React.FC<SecureChatNodeProps> = ({ 
@@ -17,10 +18,49 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
   sendMessage, 
   connectedPeers, 
   role,
-  onClickProfile
+  onClickProfile,
+  startCall
 }) => {
   const [text, setText] = useState("");
   const isConnected = connectedPeers > 0;
+  
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const startRecording = async () => {
+    if (!isConnected) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      mediaRecorder.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data);
+      };
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current);
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          const base64AudioMessage = reader.result as string;
+          sendMessage("🎤 Voice Message", base64AudioMessage);
+        };
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (e) {
+      console.error("Microphone access denied or error:", e);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +83,20 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
             Secure Group Chat
           </h2>
         </div>
-        <div className="flex items-center gap-2 bg-white/40 dark:bg-transparent px-3 py-1 rounded-full border border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent ">
+        <div className="flex items-center gap-3">
+          {isConnected && (
+            <div className="flex items-center gap-1 mr-2 border-r border-white/20 dark:border-white/10 pr-3">
+              <button onClick={() => startCall?.('audio')} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-muted hover:text-text cursor-pointer" title="Start Private Voice Call (Experimental)">
+                <Phone className="w-4 h-4" />
+              </button>
+              {role === 'host' && (
+                <button onClick={() => startCall?.('video')} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-muted hover:text-text cursor-pointer" title="Start Group Video Call (Experimental)">
+                  <Video className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-2 bg-white/40 dark:bg-transparent px-3 py-1 rounded-full border border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent ">
           <span className={cn(
             "h-2 w-2 rounded-full animate-pulse",
             isConnected ? "bg-success" : "bg-red-500"
@@ -51,6 +104,7 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
           <span className="text-[10px] text-text font-semibold uppercase tracking-wider">
             {isConnected ? "P2P DIRECT LINK" : "OFFLINE"}
           </span>
+        </div>
         </div>
       </div>
 
@@ -119,6 +173,11 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
                 <div className="whitespace-pre-wrap break-words leading-relaxed font-medium">
                   {msg.text}
                 </div>
+                {msg.audioData && (
+                  <div className="mt-2">
+                    <audio controls src={msg.audioData} className="max-w-full h-8" />
+                  </div>
+                )}
               </motion.div>
             )
           })}
@@ -128,6 +187,22 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
       {/* Input */}
       <div className="p-3 bg-white/30 dark:bg-transparent backdrop-blur-md border-t border-white/40 dark:border-transparent dark:border-white/10 dark:border-transparent rounded-b-3xl">
         <form className="flex gap-2" onSubmit={handleSubmit}>
+          <button 
+            type="button"
+            disabled={!isConnected}
+            onMouseDown={startRecording}
+            onMouseUp={stopRecording}
+            onMouseLeave={stopRecording}
+            onTouchStart={startRecording}
+            onTouchEnd={stopRecording}
+            className={cn(
+              "p-2.5 rounded-xl border transition-colors flex items-center justify-center cursor-pointer disabled:opacity-50 select-none",
+              isRecording ? "bg-red-500 text-white border-red-600 animate-pulse" : "bg-white/50 dark:bg-white/5 border-white/60 dark:border-white/10 text-muted hover:text-text"
+            )}
+            title="Hold to Record Voice Message (Experimental)"
+          >
+            <Mic className="w-5 h-5" />
+          </button>
           <input 
             value={text}
             onChange={(e) => setText(e.target.value)}

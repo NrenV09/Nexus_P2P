@@ -8,6 +8,7 @@ export interface ChatMessage {
   senderName?: string;
   senderColor?: string;
   senderId?: string;
+  audioData?: string;
   timestamp: Date;
 }
 
