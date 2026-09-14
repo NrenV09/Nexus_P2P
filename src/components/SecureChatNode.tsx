@@ -39,7 +39,7 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
         audioChunksRef.current.push(event.data);
       };
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current);
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
