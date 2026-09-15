@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { 
   PhoneOff, 
   Mic, 
@@ -117,12 +117,13 @@ export function CallOverlay({
   isMinimized?: boolean;
   onToggleMinimize?: () => void;
 }) {
-  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const [screenTrack, setScreenTrack] = useState<MediaStreamTrack | null>(null);
+  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(type === 'audio');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const dragControls = useDragControls();
 
   // Internal minimize fallback
   const [internalMinimized, setInternalMinimized] = useState(false);
@@ -148,24 +149,19 @@ export function CallOverlay({
     return () => clearInterval(timer);
   }, []);
 
-  const hasActiveVideoTrack = localStream 
-    ? localStream.getVideoTracks().some(t => t.readyState === 'live')
-    : false;
-
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      if (localVideoRef.current.srcObject !== localStream) {
-        localVideoRef.current.srcObject = localStream;
-      }
-      if (!isVideoOff) {
-        localVideoRef.current.play().catch(e => console.warn("Local preview play error:", e));
-      }
-    }
-  }, [localStream, active, isVideoOff]);
-
   useEffect(() => {
     setIsVideoOff(type === 'audio');
   }, [type]);
+
+  // Clean up screen sharing on unmount
+  useEffect(() => {
+    return () => {
+      if (screenTrackRef.current) {
+        screenTrackRef.current.stop();
+        screenTrackRef.current = null;
+      }
+    };
+  }, []);
 
   const toggleMic = () => {
     if (!localStream) return;
@@ -203,13 +199,11 @@ export function CallOverlay({
     const nextState = !isVideoOff;
     const newEnabled = !nextState;
     videoTracks.forEach(track => {
-      track.enabled = newEnabled;
+      if (track !== screenTrackRef.current) {
+        track.enabled = newEnabled;
+      }
     });
     setIsVideoOff(nextState);
-
-    if (newEnabled && localVideoRef.current) {
-      localVideoRef.current.play().catch(e => console.warn("Local preview play error:", e));
-    }
     onToggleTrack?.('video', newEnabled);
   };
 
@@ -219,16 +213,13 @@ export function CallOverlay({
         screenTrackRef.current.stop();
         screenTrackRef.current = null;
       }
+      setScreenTrack(null);
       setIsScreenSharing(false);
       // Resume camera track
       if (localStream) {
         const camTrack = localStream.getVideoTracks().find(t => t !== screenTrackRef.current && t.readyState === 'live');
         if (camTrack) {
           camTrack.enabled = true;
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = localStream;
-            localVideoRef.current.play().catch(() => {});
-          }
           onRequestAddTrack?.(camTrack);
         }
       }
@@ -241,10 +232,11 @@ export function CallOverlay({
         return;
       }
       const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      const screenTrack = displayStream.getVideoTracks()[0];
-      if (!screenTrack) return;
+      const newTrack = displayStream.getVideoTracks()[0];
+      if (!newTrack) return;
 
-      screenTrackRef.current = screenTrack;
+      screenTrackRef.current = newTrack;
+      setScreenTrack(newTrack);
       setIsScreenSharing(true);
       setIsVideoOff(false);
 
@@ -254,29 +246,23 @@ export function CallOverlay({
       setSpotlightId('local');
 
       if (localStream) {
-        localStream.addTrack(screenTrack);
+        localStream.addTrack(newTrack);
       }
 
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = new MediaStream([screenTrack]);
-        localVideoRef.current.play().catch(() => {});
-      }
-
-      onRequestAddTrack?.(screenTrack);
+      onRequestAddTrack?.(newTrack);
       onToggleTrack?.('video', true);
 
-      screenTrack.onended = () => {
+      newTrack.onended = () => {
         setIsScreenSharing(false);
+        setScreenTrack(null);
         screenTrackRef.current = null;
         if (localStream) {
-          localStream.removeTrack(screenTrack);
+          try {
+            localStream.removeTrack(newTrack);
+          } catch (_) {}
           const camTrack = localStream.getVideoTracks().find(t => t.readyState === 'live');
           if (camTrack) {
             camTrack.enabled = true;
-            if (localVideoRef.current) {
-              localVideoRef.current.srcObject = localStream;
-              localVideoRef.current.play().catch(() => {});
-            }
             onRequestAddTrack?.(camTrack);
           }
         }
@@ -355,153 +341,168 @@ export function CallOverlay({
             ))}
           </div>
 
-          {/* MAIN CALL CONTAINER */}
-          <motion.div 
-            layout
-            drag={minimized}
-            dragMomentum={false}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className={cn(
-              "text-white flex flex-col font-sans select-none transition-shadow duration-200",
-              minimized
-                ? "fixed bottom-5 right-5 z-[95] w-72 sm:w-80 md:w-88 rounded-2xl shadow-2xl border border-white/20 bg-[#1e2024]/95 backdrop-blur-xl overflow-hidden cursor-move"
-                : "fixed inset-0 z-[110] bg-[#1a1b1e] overflow-hidden cursor-default"
-            )}
-          >
-            {/* ------------------------------------------------------------- */}
-            {/* MINIMIZED (PICTURE-IN-PICTURE) MODE WIDGET                     */}
-            {/* Allows using Secure Chat and File Transfer simultaneously      */}
-            {/* ------------------------------------------------------------- */}
-            {minimized ? (
-              <div className="w-full flex flex-col">
-                {/* Mini Header: Drag bar + Expand button */}
-                <div className="h-10 px-3 bg-[#26282c] border-b border-white/10 flex items-center justify-between flex-shrink-0 cursor-grab active:cursor-grabbing">
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <GripHorizontal className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-                    <span className="text-xs font-semibold text-white/90 truncate">
-                      {pipPrimaryId === 'local' ? 'Call Preview' : resolveParticipantName(pipPrimaryId)}
-                    </span>
-                    <span className="text-[10px] text-white/40 font-mono hidden sm:inline">
-                      {currentTime.toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    {/* Maximize Button */}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleMinimize(); }}
-                      className="p-1 rounded-lg hover:bg-white/15 text-white/80 hover:text-white transition-colors cursor-pointer"
-                      title="Maximize call to full screen"
-                    >
-                      <Maximize2 className="w-4 h-4" />
-                    </button>
-                  </div>
+          {/* ------------------------------------------------------------- */}
+          {/* MINIMIZED (PICTURE-IN-PICTURE) MODE WIDGET                     */}
+          {/* Allows using Secure Chat and File Transfer simultaneously      */}
+          {/* ------------------------------------------------------------- */}
+          {minimized ? (
+            <motion.div
+              key="call-overlay-pip"
+              drag
+              dragControls={dragControls}
+              dragListener={false}
+              dragMomentum={false}
+              dragElastic={0.08}
+              initial={{ opacity: 0, scale: 0.85, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.85, y: 20 }}
+              transition={{ type: "spring", stiffness: 350, damping: 28 }}
+              className="fixed bottom-5 right-5 z-[95] w-72 sm:w-80 md:w-88 rounded-2xl shadow-2xl border border-white/20 bg-[#1e2024]/95 backdrop-blur-xl overflow-hidden select-none text-white font-sans transition-shadow duration-200"
+            >
+              {/* Mini Header: Drag bar + Maximize button */}
+              <div 
+                onPointerDown={(e) => {
+                  if ((e.target as HTMLElement).closest('button')) return;
+                  dragControls.start(e);
+                }}
+                className="h-10 px-3 bg-[#26282c] border-b border-white/10 flex items-center justify-between flex-shrink-0 cursor-grab active:cursor-grabbing select-none"
+              >
+                <div className="flex items-center gap-2 overflow-hidden pointer-events-none">
+                  <GripHorizontal className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+                  <span className="text-xs font-semibold text-white/90 truncate">
+                    {pipPrimaryId === 'local' ? (isScreenSharing ? 'Your Screen' : 'You') : resolveParticipantName(pipPrimaryId)}
+                  </span>
+                  <span className="text-[10px] text-white/40 font-mono hidden sm:inline">
+                    {currentTime.toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })}
+                  </span>
                 </div>
 
-                {/* Mini Video Feed (Aspect-preserved with object-contain) */}
-                <div 
-                  onClick={toggleMinimize}
-                  className="w-full h-44 sm:h-48 bg-[#121316] relative overflow-hidden cursor-pointer group flex items-center justify-center"
-                  title="Click to maximize meeting"
-                >
-                  {pipPrimaryId === 'local' ? (
-                    <LocalVideoTile 
-                      videoRef={localVideoRef}
-                      isVideoOff={isVideoOff}
-                      hasActiveVideoTrack={hasActiveVideoTrack}
-                      isScreenSharing={isScreenSharing}
-                      isLocalSpeaking={isLocalSpeaking}
-                      isMicMuted={isMicMuted}
+                <div className="flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
+                  {/* Maximize Button */}
+                  <button
+                    onClick={toggleMinimize}
+                    className="p-1.5 rounded-lg hover:bg-white/15 text-white/80 hover:text-white transition-colors cursor-pointer"
+                    title="Maximize meeting to full screen"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Mini Video Feed (Aspect-preserved with object-contain) */}
+              <div 
+                onClick={toggleMinimize}
+                className="w-full h-44 sm:h-48 bg-[#121316] relative overflow-hidden cursor-pointer group flex items-center justify-center"
+                title="Click to maximize meeting"
+              >
+                {pipPrimaryId === 'local' ? (
+                  <LocalVideoTile 
+                    stream={localStream}
+                    screenTrack={screenTrack}
+                    isVideoOff={isVideoOff}
+                    isScreenSharing={isScreenSharing}
+                    isLocalSpeaking={isLocalSpeaking}
+                    isMicMuted={isMicMuted}
+                    fitMode="contain"
+                    isThumbnail={true}
+                  />
+                ) : (
+                  remoteStreams[pipPrimaryId] && (
+                    <RemoteVideoTile 
+                      id={pipPrimaryId}
+                      name={resolveParticipantName(pipPrimaryId)}
+                      stream={remoteStreams[pipPrimaryId]}
+                      isRemoteVideoOff={peerTrackStates?.[pipPrimaryId]?.video === false || (type === 'audio' && peerTrackStates?.[pipPrimaryId]?.video !== true)}
+                      isRemoteAudioMuted={peerTrackStates?.[pipPrimaryId]?.audio === false}
                       fitMode="contain"
                       isThumbnail={true}
                     />
-                  ) : (
-                    remoteStreams[pipPrimaryId] && (
-                      <RemoteVideoTile 
-                        id={pipPrimaryId}
-                        name={resolveParticipantName(pipPrimaryId)}
-                        stream={remoteStreams[pipPrimaryId]}
-                        isRemoteVideoOff={peerTrackStates?.[pipPrimaryId]?.video === false || (type === 'audio' && peerTrackStates?.[pipPrimaryId]?.video !== true)}
-                        isRemoteAudioMuted={peerTrackStates?.[pipPrimaryId]?.audio === false}
-                        fitMode="contain"
-                        isThumbnail={true}
-                      />
-                    )
-                  )}
+                  )
+                )}
 
-                  {/* Hover Overlay: Click to Maximize */}
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[2px] z-20">
-                    <span className="text-xs font-semibold bg-white/20 px-2.5 py-1 rounded-full text-white flex items-center gap-1.5 shadow">
-                      <Maximize2 className="w-3.5 h-3.5" />
-                      Click to Maximize
-                    </span>
-                  </div>
-
-                  {/* Multiple participant badge if > 1 remote */}
-                  {totalParticipants > 2 && (
-                    <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[10px] font-medium text-white/80 backdrop-blur-md z-10">
-                      +{totalParticipants - 1} peers
-                    </div>
-                  )}
+                {/* Hover Overlay: Click to Maximize */}
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[2px] z-20">
+                  <span className="text-xs font-semibold bg-white/20 px-2.5 py-1 rounded-full text-white flex items-center gap-1.5 shadow">
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    Maximize Meeting
+                  </span>
                 </div>
 
-                {/* Mini Control Strip */}
-                <div className="h-12 px-3 bg-[#202124] border-t border-white/10 flex items-center justify-between flex-shrink-0">
-                  <div className="flex items-center gap-2">
-                    {/* Mic Toggle */}
-                    <button 
-                      onClick={toggleMic}
-                      className={cn(
-                        "w-8 h-8 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow",
-                        isMicMuted ? "bg-red-500 text-white" : "bg-white/10 hover:bg-white/20 text-white"
-                      )}
-                      title={isMicMuted ? "Unmute mic" : "Mute mic"}
-                    >
-                      {isMicMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                    </button>
-
-                    {/* Video Toggle */}
-                    <button 
-                      onClick={toggleVideo}
-                      className={cn(
-                        "w-8 h-8 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow",
-                        (isVideoOff || !hasActiveVideoTrack) ? "bg-red-500 text-white" : "bg-white/10 hover:bg-white/20 text-white"
-                      )}
-                      title={isVideoOff ? "Turn on camera" : "Turn off camera"}
-                    >
-                      {(isVideoOff || !hasActiveVideoTrack) ? <VideoOff className="w-3.5 h-3.5" /> : <Video className="w-3.5 h-3.5" />}
-                    </button>
+                {/* Multiple participant badge if > 1 remote */}
+                {totalParticipants > 2 && (
+                  <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[10px] font-medium text-white/80 backdrop-blur-md z-10">
+                    +{totalParticipants - 1} peers
                   </div>
+                )}
+              </div>
 
-                  <div className="flex items-center gap-2">
-                    {/* Expand Button */}
-                    <button
-                      onClick={toggleMinimize}
-                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shadow"
-                    >
-                      <Maximize2 className="w-3.5 h-3.5" />
-                      <span>Expand</span>
-                    </button>
+              {/* Mini Control Strip */}
+              <div 
+                onPointerDown={(e) => e.stopPropagation()}
+                className="h-12 px-3 bg-[#202124] border-t border-white/10 flex items-center justify-between flex-shrink-0"
+              >
+                <div className="flex items-center gap-2">
+                  {/* Mic Toggle */}
+                  <button 
+                    onClick={toggleMic}
+                    className={cn(
+                      "w-8 h-8 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow",
+                      isMicMuted ? "bg-red-500 text-white" : "bg-white/10 hover:bg-white/20 text-white"
+                    )}
+                    title={isMicMuted ? "Unmute mic" : "Mute mic"}
+                  >
+                    {isMicMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                  </button>
 
-                    {/* End Call */}
-                    <button 
-                      onClick={onEndCall}
-                      className="w-8 h-8 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow"
-                      title="Leave call"
-                    >
-                      <PhoneOff className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  {/* Video Toggle */}
+                  <button 
+                    onClick={toggleVideo}
+                    className={cn(
+                      "w-8 h-8 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow",
+                      (isVideoOff && !isScreenSharing) ? "bg-red-500 text-white" : "bg-white/10 hover:bg-white/20 text-white"
+                    )}
+                    title={isVideoOff ? "Turn on camera" : "Turn off camera"}
+                  >
+                    {(isVideoOff && !isScreenSharing) ? <VideoOff className="w-3.5 h-3.5" /> : <Video className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* Maximize Button */}
+                  <button
+                    onClick={toggleMinimize}
+                    className="px-2.5 py-1 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-blue-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shadow"
+                    title="Maximize meeting to full screen"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    <span>Maximize</span>
+                  </button>
+
+                  {/* End Call */}
+                  <button 
+                    onClick={onEndCall}
+                    className="w-8 h-8 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow"
+                    title="Leave call"
+                  >
+                    <PhoneOff className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
-            ) : (
-              /* ------------------------------------------------------------- */
-              /* FULL-SCREEN MEETING MODE                                      */
-              /* ------------------------------------------------------------- */
+            </motion.div>
+          ) : (
+            /* ------------------------------------------------------------- */
+            /* FULL-SCREEN MEETING MODE                                      */
+            /* ------------------------------------------------------------- */
+            <motion.div
+              key="call-overlay-fullscreen"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="fixed inset-0 z-[110] bg-[#1a1b1e] w-screen h-screen overflow-hidden flex flex-col cursor-default select-none text-white font-sans"
+              style={{ top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', transform: 'none' }}
+            >
               <div className="w-full h-full flex flex-col">
                 {/* Top Bar: View Mode Switcher, Call Info & Minimize Button */}
                 <div className="h-14 px-4 md:px-6 flex items-center justify-between border-b border-white/10 bg-[#202124]/90 backdrop-blur-md flex-shrink-0 z-20">
@@ -578,9 +579,9 @@ export function CallOverlay({
                       <div className="flex-1 h-full min-h-[300px] flex items-center justify-center relative bg-[#131416] rounded-2xl overflow-hidden border border-white/15 shadow-2xl">
                         {effectiveSpotlightId === 'local' ? (
                           <LocalVideoTile 
-                            videoRef={localVideoRef}
+                            stream={localStream}
+                            screenTrack={screenTrack}
                             isVideoOff={isVideoOff}
-                            hasActiveVideoTrack={hasActiveVideoTrack}
                             isScreenSharing={isScreenSharing}
                             isLocalSpeaking={isLocalSpeaking}
                             isMicMuted={isMicMuted}
@@ -616,9 +617,9 @@ export function CallOverlay({
                             title="Click to spotlight your video"
                           >
                             <LocalVideoTile 
-                              videoRef={localVideoRef}
+                              stream={localStream}
+                              screenTrack={screenTrack}
                               isVideoOff={isVideoOff}
-                              hasActiveVideoTrack={hasActiveVideoTrack}
                               isScreenSharing={isScreenSharing}
                               isLocalSpeaking={isLocalSpeaking}
                               isMicMuted={isMicMuted}
@@ -684,9 +685,9 @@ export function CallOverlay({
                         isLocalSpeaking ? "border-emerald-500 ring-2 ring-emerald-500/40" : "border-white/10"
                       )}>
                         <LocalVideoTile 
-                          videoRef={localVideoRef}
+                          stream={localStream}
+                          screenTrack={screenTrack}
                           isVideoOff={isVideoOff}
-                          hasActiveVideoTrack={hasActiveVideoTrack}
                           isScreenSharing={isScreenSharing}
                           isLocalSpeaking={isLocalSpeaking}
                           isMicMuted={isMicMuted}
@@ -773,13 +774,13 @@ export function CallOverlay({
                       onClick={toggleVideo}
                       className={cn(
                         "w-12 h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
-                        (isVideoOff || !hasActiveVideoTrack)
+                        isVideoOff
                           ? "bg-[#ea4335] text-white hover:bg-[#d93025]" 
                           : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
                       )}
                       title={isVideoOff ? "Turn on camera" : "Turn off camera"}
                     >
-                      {(isVideoOff || !hasActiveVideoTrack) ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                      {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
                     </button>
 
                     {/* Screen Share Toggle */}
@@ -846,8 +847,8 @@ export function CallOverlay({
                   </div>
                 </div>
               </div>
-            )}
-          </motion.div>
+            </motion.div>
+          )}
         </>
       )}
     </AnimatePresence>
@@ -857,23 +858,10 @@ export function CallOverlay({
 // -------------------------------------------------------------
 // LOCAL VIDEO TILE
 // -------------------------------------------------------------
-function LocalVideoTile({
-  videoRef,
-  isVideoOff,
-  hasActiveVideoTrack,
-  isScreenSharing,
-  isLocalSpeaking,
-  isMicMuted,
-  fitMode = 'contain',
-  isSpotlightStage = false,
-  isThumbnail = false,
-  onToggleFit,
-  onSpotlight,
-  onUnspotlight
-}: {
-  videoRef: React.RefObject<HTMLVideoElement>;
+interface LocalVideoTileProps {
+  stream: MediaStream | null;
+  screenTrack: MediaStreamTrack | null;
   isVideoOff: boolean;
-  hasActiveVideoTrack: boolean;
   isScreenSharing: boolean;
   isLocalSpeaking: boolean;
   isMicMuted: boolean;
@@ -883,8 +871,61 @@ function LocalVideoTile({
   onToggleFit?: () => void;
   onSpotlight?: () => void;
   onUnspotlight?: () => void;
-}) {
+}
+
+function LocalVideoTile({
+  stream,
+  screenTrack,
+  isVideoOff,
+  isScreenSharing,
+  isLocalSpeaking,
+  isMicMuted,
+  fitMode = 'contain',
+  isSpotlightStage = false,
+  isThumbnail = false,
+  onToggleFit,
+  onSpotlight,
+  onUnspotlight
+}: LocalVideoTileProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [aspectLandscape, setAspectLandscape] = useState(false);
+
+  // Check if camera has a live video track
+  const hasActiveCameraTrack = Boolean(
+    stream && stream.getVideoTracks().some(t => t.readyState === 'live')
+  );
+
+  // Check if screen sharing track is active and live
+  const hasActiveScreenTrack = Boolean(
+    isScreenSharing && screenTrack && screenTrack.readyState === 'live'
+  );
+
+  // Media stream to display in this video element:
+  // When screen sharing is on, display screenTrack!
+  // Otherwise, if camera is enabled, display stream.
+  const displayStream = useMemo(() => {
+    if (hasActiveScreenTrack && screenTrack) {
+      return new MediaStream([screenTrack]);
+    }
+    if (!isVideoOff && stream && hasActiveCameraTrack) {
+      return stream;
+    }
+    return null;
+  }, [hasActiveScreenTrack, screenTrack, isVideoOff, stream, hasActiveCameraTrack]);
+
+  useEffect(() => {
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    if (displayStream) {
+      if (vid.srcObject !== displayStream) {
+        vid.srcObject = displayStream;
+      }
+      vid.play().catch(e => console.warn("Local video play error:", e));
+    } else {
+      vid.srcObject = null;
+    }
+  }, [displayStream]);
 
   const handleMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const vid = e.currentTarget;
@@ -892,6 +933,8 @@ function LocalVideoTile({
       setAspectLandscape(vid.videoWidth / vid.videoHeight >= 1.15);
     }
   };
+
+  const showVideo = hasActiveScreenTrack || (!isVideoOff && hasActiveCameraTrack);
 
   return (
     <div className={cn(
@@ -908,13 +951,13 @@ function LocalVideoTile({
         className={cn(
           "w-full h-full transition-all duration-150",
           fitMode === 'contain' ? "object-contain" : "object-cover",
-          isScreenSharing ? "transform-none" : "transform -scale-x-100",
-          (isVideoOff || !hasActiveVideoTrack) ? "opacity-0 pointer-events-none absolute inset-0" : "opacity-100"
+          hasActiveScreenTrack ? "transform-none" : "transform -scale-x-100",
+          showVideo ? "opacity-100" : "opacity-0 pointer-events-none absolute inset-0"
         )}
       />
 
       {/* Avatar Fallback for audio or camera off */}
-      {(isVideoOff || !hasActiveVideoTrack) && (
+      {!showVideo && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#25272a]">
           <div className={cn(
             "rounded-full bg-blue-600/30 border-2 flex items-center justify-center text-blue-200 font-bold uppercase shadow-inner transition-all",
@@ -923,7 +966,7 @@ function LocalVideoTile({
           )}>
             You
           </div>
-          {!isThumbnail && isVideoOff && (
+          {!isThumbnail && isVideoOff && !hasActiveScreenTrack && (
             <span className="text-xs text-white/50 mt-2 font-medium">Camera is off</span>
           )}
         </div>
@@ -971,7 +1014,7 @@ function LocalVideoTile({
         <div className="absolute top-3 left-3 flex items-center gap-2 bg-amber-500/90 text-black px-2.5 py-1 rounded-md text-xs font-bold shadow z-20 backdrop-blur-sm">
           <Sparkles className="w-3.5 h-3.5" />
           <span>SPOTLIGHT • YOU</span>
-          {isScreenSharing && <span className="bg-black/20 px-1 rounded text-[10px]">SCREEN</span>}
+          {hasActiveScreenTrack && <span className="bg-black/20 px-1 rounded text-[10px]">SCREEN</span>}
         </div>
       )}
 
@@ -992,9 +1035,9 @@ function LocalVideoTile({
           <Mic className="w-3.5 h-3.5 text-emerald-400" />
         )}
         <span className="truncate max-w-[120px]">
-          You {isScreenSharing ? '(Screen)' : ''}
+          You {hasActiveScreenTrack ? '(Screen)' : ''}
         </span>
-        {aspectLandscape && isScreenSharing && !isThumbnail && (
+        {aspectLandscape && hasActiveScreenTrack && !isThumbnail && (
           <span className="text-[10px] text-amber-300 bg-amber-400/20 px-1 py-0.5 rounded font-mono">
             Landscape
           </span>

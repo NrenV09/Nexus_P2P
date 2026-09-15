@@ -9,7 +9,6 @@ import {
   Zap, 
   Check, 
   Copy, 
-  Volume2, 
   Code2,
   Lock,
   Sparkles
@@ -19,38 +18,6 @@ import { cn } from '../lib/utils';
 interface EasterEggModalProps {
   isOpen: boolean;
   onClose: () => void;
-}
-
-// Synthesize pleasant sci-fi harmonic chime
-export function playQuantumChime() {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const now = ctx.currentTime;
-    
-    // Harmonic arpeggiated chord: C5, E5, G5, B5, C6
-    const notes = [523.25, 659.25, 783.99, 987.77, 1046.50];
-    notes.forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      
-      osc.type = idx % 2 === 0 ? 'sine' : 'triangle';
-      osc.frequency.setValueAtTime(freq, now + idx * 0.07);
-      
-      gain.gain.setValueAtTime(0.0001, now + idx * 0.07);
-      gain.gain.linearRampToValueAtTime(0.08, now + idx * 0.07 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.07 + 1.2);
-      
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      
-      osc.start(now + idx * 0.07);
-      osc.stop(now + idx * 0.07 + 1.25);
-    });
-  } catch (e) {
-    console.debug("Audio play skipped:", e);
-  }
 }
 
 // Gentle tap feedback tick
@@ -92,7 +59,6 @@ export const EasterEggModal: React.FC<EasterEggModalProps> = ({ isOpen, onClose 
       return;
     }
 
-    playQuantumChime();
     setTypedText("");
     setTypingDone(false);
 
@@ -230,14 +196,6 @@ export const EasterEggModal: React.FC<EasterEggModalProps> = ({ isOpen, onClose 
 
                     {/* Action Bar */}
                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-emerald-500/20">
-                      <button
-                        onClick={playQuantumChime}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Volume2 className="w-3.5 h-3.5" />
-                        <span>Chime</span>
-                      </button>
-
                       <button
                         onClick={handleCopy}
                         className="px-3 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs flex items-center gap-1.5 transition-colors cursor-pointer"

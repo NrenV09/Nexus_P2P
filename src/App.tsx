@@ -48,7 +48,7 @@ import { ViewProfileModal } from './components/ViewProfileModal';
 import { NexusFailoverHUD } from './components/NexusFailoverHUD';
 import { CallOverlay } from './components/CallOverlay';
 import { IncomingCallModal, IncomingCallData } from './components/IncomingCallModal';
-import { EasterEggModal, playQuantumChime, playTapTick } from './components/EasterEggModal';
+import { EasterEggModal, playTapTick } from './components/EasterEggModal';
 import { generateRandomName } from './lib/nameGenerator';
 
 const CHUNK_SIZE = 131072; // Max WebRTC chunk size (128KB)
@@ -172,7 +172,6 @@ export default function App() {
       const next = prev + 1;
       if (next >= 10) {
         setShowCreatorPopup(true);
-        playQuantumChime();
         return 0;
       } else {
         playTapTick(next);
@@ -1438,15 +1437,24 @@ export default function App() {
 
   const handleAddTrack = async (track: MediaStreamTrack) => {
     setCallType('video');
-    peerConnections.current.forEach(pc => {
+    peerConnections.current.forEach(async (pc, peerId) => {
+      // If a video sender already exists, replace track directly for seamless transition
+      const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (videoSender) {
+        try {
+          await videoSender.replaceTrack(track);
+          return;
+        } catch (e) {
+          console.warn("replaceTrack fallback to renegotiation:", e);
+        }
+      }
+
       if (localStreamRef.current) {
         if (!pc.getSenders().find(s => s.track === track)) {
           pc.addTrack(track, localStreamRef.current);
         }
       }
-    });
 
-    peerConnections.current.forEach(async (pc, peerId) => {
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
