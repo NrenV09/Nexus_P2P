@@ -19,7 +19,8 @@ import {
   Share,
   Moon,
   Sun,
-  PhoneCall
+  PhoneCall,
+  Maximize2
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -163,6 +164,7 @@ export default function App() {
   const [titleTapCount, setTitleTapCount] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isCallActive, setIsCallActive] = useState(false);
+  const [isCallMinimized, setIsCallMinimized] = useState(false);
   const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleTitleClick = useCallback(() => {
@@ -866,6 +868,7 @@ export default function App() {
             });
             setLocalStream(null);
             setIsCallActive(false);
+            setIsCallMinimized(false);
             setCallType(null);
             setRemoteStreams({});
             setPeerTrackStates({});
@@ -1256,6 +1259,7 @@ export default function App() {
     setLocalStream(stream);
     setCallType(type);
     setIsCallActive(true);
+    setIsCallMinimized(false);
     addLog(`Started ${type} call`, "ok");
     
     if (isSimulation) {
@@ -1324,6 +1328,7 @@ export default function App() {
     setLocalStream(stream);
     setCallType(incoming.callType);
     setIsCallActive(true);
+    setIsCallMinimized(false);
     addLog(`Joined ${incoming.callType} call with ${incoming.callerName}`, "ok");
 
     const pc = peerConnections.current.get(incoming.peerId);
@@ -1405,6 +1410,7 @@ export default function App() {
     });
 
     setIsCallActive(false);
+    setIsCallMinimized(false);
     setCallType(null);
     setRemoteStreams({});
     setPeerTrackStates({});
@@ -1744,6 +1750,19 @@ export default function App() {
         </div>
 
         <div className="flex gap-2 md:gap-3 lg:gap-6 items-center flex-shrink-0 ml-auto md:ml-0">
+          {/* Active Call Background Indicator (PiP mode indicator) */}
+          {isCallActive && isCallMinimized && (
+            <button
+              onClick={() => setIsCallMinimized(false)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 transition-all text-xs font-semibold cursor-pointer shadow-sm animate-pulse"
+              title="Call is active in background. Click to maximize full meeting view."
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <span className="hidden sm:inline">Active Call</span>
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           <button
             onClick={() => setShowProfileModal(true)}
             className="flex items-center justify-center hover:bg-white/40 dark:hover:bg-white/5 rounded-full transition-all group"
@@ -2354,6 +2373,8 @@ export default function App() {
         onEndCall={endCall}
         onToggleTrack={handleToggleTrack}
         onRequestAddTrack={handleAddTrack}
+        isMinimized={isCallMinimized}
+        onToggleMinimize={() => setIsCallMinimized(prev => !prev)}
       />
 
       <AnimatePresence>
