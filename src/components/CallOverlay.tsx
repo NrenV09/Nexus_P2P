@@ -15,7 +15,10 @@ import {
   LayoutGrid,
   Maximize2,
   Minimize2,
-  GripHorizontal
+  GripHorizontal,
+  ShieldCheck,
+  Radio,
+  Activity
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { UserProfile } from '../types';
@@ -357,19 +360,22 @@ export function CallOverlay({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.85, y: 20 }}
               transition={{ type: "spring", stiffness: 350, damping: 28 }}
-              className="fixed bottom-5 right-5 z-[95] w-72 sm:w-80 md:w-88 rounded-2xl shadow-2xl border border-white/20 bg-[#1e2024]/95 backdrop-blur-xl overflow-hidden select-none text-white font-sans transition-shadow duration-200"
+              className="fixed bottom-5 right-5 z-[95] w-72 sm:w-80 md:w-88 rounded-2xl shadow-[0_24px_50px_rgba(0,0,0,0.7)] border border-white/[0.12] bg-[#121418]/95 backdrop-blur-2xl overflow-hidden select-none text-white font-sans ring-1 ring-white/5 transition-shadow duration-200"
             >
-              {/* Mini Header: Drag bar + Maximize button */}
+              {/* Mini Header: Drag bar + Status + Maximize button */}
               <div 
                 onPointerDown={(e) => {
                   if ((e.target as HTMLElement).closest('button')) return;
                   dragControls.start(e);
                 }}
-                className="h-10 px-3 bg-[#26282c] border-b border-white/10 flex items-center justify-between flex-shrink-0 cursor-grab active:cursor-grabbing select-none"
+                className="h-10 px-3 bg-[#181a20]/95 border-b border-white/[0.08] flex items-center justify-between flex-shrink-0 cursor-grab active:cursor-grabbing select-none"
               >
                 <div className="flex items-center gap-2 overflow-hidden pointer-events-none">
                   <GripHorizontal className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+                  <span className="relative flex h-2 w-2 flex-shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  </span>
                   <span className="text-xs font-semibold text-white/90 truncate">
                     {pipPrimaryId === 'local' ? (isScreenSharing ? 'Your Screen' : 'You') : resolveParticipantName(pipPrimaryId)}
                   </span>
@@ -382,7 +388,7 @@ export function CallOverlay({
                   {/* Maximize Button */}
                   <button
                     onClick={toggleMinimize}
-                    className="p-1.5 rounded-lg hover:bg-white/15 text-white/80 hover:text-white transition-colors cursor-pointer"
+                    className="p-1.5 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-colors cursor-pointer"
                     title="Maximize meeting to full screen"
                   >
                     <Maximize2 className="w-4 h-4" />
@@ -393,7 +399,7 @@ export function CallOverlay({
               {/* Mini Video Feed (Aspect-preserved with object-contain) */}
               <div 
                 onClick={toggleMinimize}
-                className="w-full h-44 sm:h-48 bg-[#121316] relative overflow-hidden cursor-pointer group flex items-center justify-center"
+                className="w-full h-44 sm:h-48 bg-[#0b0c0f] relative overflow-hidden cursor-pointer group flex items-center justify-center"
                 title="Click to maximize meeting"
               >
                 {pipPrimaryId === 'local' ? (
@@ -422,8 +428,8 @@ export function CallOverlay({
                 )}
 
                 {/* Hover Overlay: Click to Maximize */}
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[2px] z-20">
-                  <span className="text-xs font-semibold bg-white/20 px-2.5 py-1 rounded-full text-white flex items-center gap-1.5 shadow">
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[3px] z-20">
+                  <span className="text-xs font-semibold bg-white/20 border border-white/20 px-3 py-1.5 rounded-full text-white flex items-center gap-1.5 shadow-lg backdrop-blur-md">
                     <Maximize2 className="w-3.5 h-3.5" />
                     Maximize Meeting
                   </span>
@@ -431,7 +437,7 @@ export function CallOverlay({
 
                 {/* Multiple participant badge if > 1 remote */}
                 {totalParticipants > 2 && (
-                  <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[10px] font-medium text-white/80 backdrop-blur-md z-10">
+                  <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/70 border border-white/10 text-[10px] font-medium text-white/90 backdrop-blur-md z-10 shadow">
                     +{totalParticipants - 1} peers
                   </div>
                 )}
@@ -440,15 +446,15 @@ export function CallOverlay({
               {/* Mini Control Strip */}
               <div 
                 onPointerDown={(e) => e.stopPropagation()}
-                className="h-12 px-3 bg-[#202124] border-t border-white/10 flex items-center justify-between flex-shrink-0"
+                className="h-12 px-3 bg-[#15171d]/95 border-t border-white/[0.08] flex items-center justify-between flex-shrink-0"
               >
                 <div className="flex items-center gap-2">
                   {/* Mic Toggle */}
                   <button 
                     onClick={toggleMic}
                     className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow",
-                      isMicMuted ? "bg-red-500 text-white" : "bg-white/10 hover:bg-white/20 text-white"
+                      "w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow",
+                      isMicMuted ? "bg-rose-600 text-white" : "bg-white/10 hover:bg-white/20 text-emerald-400"
                     )}
                     title={isMicMuted ? "Unmute mic" : "Mute mic"}
                   >
@@ -459,8 +465,8 @@ export function CallOverlay({
                   <button 
                     onClick={toggleVideo}
                     className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow",
-                      (isVideoOff && !isScreenSharing) ? "bg-red-500 text-white" : "bg-white/10 hover:bg-white/20 text-white"
+                      "w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow",
+                      (isVideoOff && !isScreenSharing) ? "bg-rose-600 text-white" : "bg-white/10 hover:bg-white/20 text-white"
                     )}
                     title={isVideoOff ? "Turn on camera" : "Turn off camera"}
                   >
@@ -472,17 +478,17 @@ export function CallOverlay({
                   {/* Maximize Button */}
                   <button
                     onClick={toggleMinimize}
-                    className="px-2.5 py-1 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-blue-200 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shadow"
+                    className="px-2.5 py-1 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 text-blue-300 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shadow"
                     title="Maximize meeting to full screen"
                   >
                     <Maximize2 className="w-3.5 h-3.5" />
-                    <span>Maximize</span>
+                    <span>Expand</span>
                   </button>
 
                   {/* End Call */}
                   <button 
                     onClick={onEndCall}
-                    className="w-8 h-8 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow"
+                    className="w-8 h-8 rounded-xl bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow shadow-rose-600/30"
                     title="Leave call"
                   >
                     <PhoneOff className="w-3.5 h-3.5" />
@@ -500,75 +506,87 @@ export function CallOverlay({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
-              className="fixed inset-0 z-[110] bg-[#1a1b1e] w-full h-full max-h-screen overflow-hidden flex flex-col cursor-default select-none text-white font-sans"
+              className="fixed inset-0 z-[110] bg-[#090a0d] w-full h-full max-h-screen overflow-hidden flex flex-col cursor-default select-none text-white font-sans"
             >
-              <div className="w-full h-full flex flex-col overflow-hidden">
+              <div className="w-full h-full flex flex-col overflow-hidden relative bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#181a22]/70 via-[#0d0f14] to-[#08080a]">
+                
                 {/* Top Bar: View Mode Switcher, Call Info & Quick Actions */}
-                <div className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-white/10 bg-[#202124]/95 backdrop-blur-md flex-shrink-0 z-20">
+                <div className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-white/[0.08] bg-[#121419]/90 backdrop-blur-xl flex-shrink-0 z-20">
                   <div className="flex items-center gap-2 sm:gap-3 overflow-hidden">
-                    <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-xs font-mono">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-                      <span className="font-semibold tracking-wide truncate">QUANTUM LINK</span>
-                      <span className="text-white/40">•</span>
-                      <span className="text-white/70 truncate hidden xs:inline">{type === 'video' ? 'Video Meeting' : 'Encrypted Audio'}</span>
+                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-300 shadow-sm">
+                      <span className="relative flex h-2 w-2 flex-shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                      </span>
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 hidden xs:inline" />
+                      <span className="font-semibold tracking-wider text-[11px] sm:text-xs">QUANTUM LINK</span>
+                      <span className="text-emerald-500/40">•</span>
+                      <span className="text-zinc-400 truncate hidden sm:inline">
+                        E2EE {type === 'video' ? 'Video' : 'Audio'}
+                      </span>
                     </div>
 
                     {viewMode === 'spotlight' && (
-                      <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-medium animate-fadeIn">
+                      <div className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-medium animate-fadeIn">
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span className="truncate max-w-[150px]">Spotlight: {resolveParticipantName(effectiveSpotlightId || '')}</span>
+                        <span className="truncate max-w-[160px]">Spotlight: {resolveParticipantName(effectiveSpotlightId || '')}</span>
                       </div>
                     )}
                   </div>
 
                   {/* View Mode & Quick Actions Controls */}
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* View Mode (Grid vs Spotlight) Segmented Switcher */}
+                    <div className="flex items-center p-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08]">
+                      <button
+                        onClick={() => {
+                          setViewMode('grid');
+                          setSpotlightId(null);
+                        }}
+                        className={cn(
+                          "px-2.5 sm:px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
+                          viewMode === 'grid'
+                            ? "bg-white/15 text-white shadow-sm font-semibold"
+                            : "text-zinc-400 hover:text-white"
+                        )}
+                        title="Grid View: See all participants equally"
+                      >
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Grid</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setViewMode('spotlight');
+                          setSpotlightId(remoteEntries.length > 0 ? remoteEntries[0][0] : 'local');
+                        }}
+                        className={cn(
+                          "px-2.5 sm:px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
+                          viewMode === 'spotlight'
+                            ? "bg-amber-500 text-zinc-950 shadow-sm font-bold"
+                            : "text-zinc-400 hover:text-white"
+                        )}
+                        title="Spotlight: Focus on active speaker or shared screen"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Spotlight</span>
+                      </button>
+                    </div>
+
                     {/* Minimize Button: Return to chat / file transfer while call stays on */}
                     <button
                       onClick={toggleMinimize}
-                      className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border bg-white/5 text-white/80 border-white/10 hover:bg-white/10 hover:text-white"
+                      className="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border bg-white/[0.05] text-zinc-300 border-white/[0.08] hover:bg-white/[0.1] hover:text-white"
                       title="Minimize to Picture-in-Picture to use Secure Chat and File Transfer"
                     >
                       <Minimize2 className="w-3.5 h-3.5 text-blue-400" />
-                      <span className="hidden md:inline">Minimize (Chat/Files)</span>
-                    </button>
-
-                    {/* Spotlight / Grid Switcher */}
-                    <button
-                      onClick={() => {
-                        if (viewMode === 'spotlight') {
-                          setViewMode('grid');
-                          setSpotlightId(null);
-                        } else {
-                          setViewMode('spotlight');
-                          setSpotlightId(remoteEntries.length > 0 ? remoteEntries[0][0] : 'local');
-                        }
-                      }}
-                      className={cn(
-                        "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border",
-                        viewMode === 'spotlight'
-                          ? "bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30"
-                          : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
-                      )}
-                      title={viewMode === 'spotlight' ? "Switch to Grid View" : "Prioritize a user with Spotlight Mode"}
-                    >
-                      {viewMode === 'spotlight' ? (
-                        <>
-                          <LayoutGrid className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Grid View</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                          <span className="hidden sm:inline">Spotlight</span>
-                        </>
-                      )}
+                      <span className="hidden md:inline">Minimize</span>
                     </button>
 
                     {/* Quick Leave in header */}
                     <button
                       onClick={onEndCall}
-                      className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer bg-red-600/80 hover:bg-red-600 text-white shadow"
+                      className="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30"
                       title="Leave call"
                     >
                       <PhoneOff className="w-3.5 h-3.5" />
@@ -582,10 +600,10 @@ export function CallOverlay({
                   
                   {/* 1. SPOTLIGHT MODE LAYOUT */}
                   {viewMode === 'spotlight' && (
-                    <div className="w-full h-full flex flex-col md:flex-row gap-2 sm:gap-3 overflow-hidden min-h-0">
+                    <div className="w-full h-full flex flex-col md:flex-row gap-2.5 sm:gap-3.5 overflow-hidden min-h-0">
                       
                       {/* Spotlight Main Stage (Hero Area) */}
-                      <div className="flex-1 min-h-0 h-full flex items-center justify-center relative bg-[#131416] rounded-xl sm:rounded-2xl overflow-hidden border border-white/15 shadow-2xl">
+                      <div className="flex-1 min-h-0 h-full flex items-center justify-center relative bg-[#0e1014] rounded-2xl sm:rounded-3xl overflow-hidden border border-white/[0.1] shadow-2xl ring-1 ring-white/5">
                         {effectiveSpotlightId === 'local' ? (
                           <LocalVideoTile 
                             stream={localStream}
@@ -617,12 +635,12 @@ export function CallOverlay({
                       </div>
 
                       {/* Filmstrip (Thumbnails of other participants) */}
-                      <div className="h-24 sm:h-28 md:h-full md:w-56 lg:w-64 flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-y-auto p-1 flex-shrink-0 min-h-0">
+                      <div className="h-24 sm:h-28 md:h-full md:w-56 lg:w-64 flex flex-row md:flex-col gap-2 sm:gap-2.5 overflow-x-auto md:overflow-y-auto p-1 flex-shrink-0 min-h-0 scrollbar-thin">
                         {/* Local Thumbnail in filmstrip if not spotlighted */}
                         {effectiveSpotlightId !== 'local' && (
                           <div 
                             onClick={() => handleSpotlight('local')}
-                            className="relative min-w-[120px] sm:min-w-[140px] md:min-w-0 md:w-full h-full md:h-32 rounded-xl overflow-hidden cursor-pointer group border border-white/10 hover:border-amber-400/60 transition-all shadow-md bg-[#25272a] flex-shrink-0"
+                            className="relative min-w-[125px] sm:min-w-[145px] md:min-w-0 md:w-full h-full md:h-34 rounded-xl sm:rounded-2xl overflow-hidden cursor-pointer group border border-white/10 hover:border-amber-400/60 transition-all shadow-lg bg-[#15171d] flex-shrink-0"
                             title="Click to spotlight your video"
                           >
                             <LocalVideoTile 
@@ -638,7 +656,7 @@ export function CallOverlay({
                             <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
                               <button 
                                 onClick={(e) => { e.stopPropagation(); handleSpotlight('local'); }}
-                                className="p-1.5 rounded-md bg-black/70 hover:bg-amber-500 text-white text-xs shadow cursor-pointer"
+                                className="p-1.5 rounded-lg bg-black/70 hover:bg-amber-500 text-white text-xs shadow-md cursor-pointer transition-colors"
                                 title="Spotlight You"
                               >
                                 <Pin className="w-3.5 h-3.5" />
@@ -656,7 +674,7 @@ export function CallOverlay({
                             <div 
                               key={id}
                               onClick={() => handleSpotlight(id)}
-                              className="relative min-w-[120px] sm:min-w-[140px] md:min-w-0 md:w-full h-full md:h-32 rounded-xl overflow-hidden cursor-pointer group border border-white/10 hover:border-amber-400/60 transition-all shadow-md bg-[#25272a] flex-shrink-0"
+                              className="relative min-w-[125px] sm:min-w-[145px] md:min-w-0 md:w-full h-full md:h-34 rounded-xl sm:rounded-2xl overflow-hidden cursor-pointer group border border-white/10 hover:border-amber-400/60 transition-all shadow-lg bg-[#15171d] flex-shrink-0"
                               title={`Click to spotlight ${resolvedName}`}
                             >
                               <RemoteVideoTile 
@@ -671,7 +689,7 @@ export function CallOverlay({
                               <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); handleSpotlight(id); }}
-                                  className="p-1.5 rounded-md bg-black/70 hover:bg-amber-500 text-white text-xs shadow cursor-pointer"
+                                  className="p-1.5 rounded-lg bg-black/70 hover:bg-amber-500 text-white text-xs shadow-md cursor-pointer transition-colors"
                                   title={`Spotlight ${resolvedName}`}
                                 >
                                   <Pin className="w-3.5 h-3.5" />
@@ -686,12 +704,14 @@ export function CallOverlay({
 
                   {/* 2. BALANCED GRID MODE LAYOUT */}
                   {viewMode === 'grid' && (
-                    <div className={cn("w-full h-full max-w-6xl flex-1 min-h-0 grid gap-2 sm:gap-3 md:gap-4 place-content-center p-1", gridCols)}>
+                    <div className={cn("w-full h-full max-w-7xl flex-1 min-h-0 grid gap-2.5 sm:gap-3.5 md:gap-4 place-content-center p-1 sm:p-2", gridCols)}>
                       
                       {/* Local Participant Tile */}
                       <div className={cn(
-                        "relative group bg-[#25272a] rounded-xl sm:rounded-2xl overflow-hidden shadow-md w-full h-full min-h-0 flex items-center justify-center border transition-all duration-300",
-                        isLocalSpeaking ? "border-emerald-500 ring-2 ring-emerald-500/40" : "border-white/10"
+                        "relative group bg-[#13151b] rounded-2xl sm:rounded-3xl overflow-hidden shadow-xl w-full h-full min-h-0 flex items-center justify-center border transition-all duration-300",
+                        isLocalSpeaking 
+                          ? "border-emerald-500/80 ring-2 ring-emerald-500/40 shadow-[0_0_24px_rgba(16,185,129,0.25)]" 
+                          : "border-white/[0.08] hover:border-white/20"
                       )}>
                         <LocalVideoTile 
                           stream={localStream}
@@ -713,7 +733,7 @@ export function CallOverlay({
                         return (
                           <div 
                             key={id}
-                            className="relative group bg-[#25272a] rounded-xl sm:rounded-2xl overflow-hidden shadow-md w-full h-full min-h-0 flex items-center justify-center border transition-all duration-300 border-white/10"
+                            className="relative group bg-[#13151b] rounded-2xl sm:rounded-3xl overflow-hidden shadow-xl w-full h-full min-h-0 flex items-center justify-center border transition-all duration-300 border-white/[0.08] hover:border-white/20"
                           >
                             <RemoteVideoTile 
                               id={id}
@@ -731,15 +751,18 @@ export function CallOverlay({
 
                       {/* Waiting state when alone in call */}
                       {remoteEntries.length === 0 && (
-                        <div className="relative group bg-[#202225] rounded-xl sm:rounded-2xl overflow-hidden shadow-md w-full h-full min-h-0 flex flex-col items-center justify-center p-4 sm:p-6 text-center border border-white/10 border-dashed">
-                          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/5 flex items-center justify-center text-white/40 mb-2 sm:mb-3 animate-pulse">
-                            <Users className="w-6 h-6 sm:w-7 sm:h-7" />
+                        <div className="relative group bg-[#121419]/80 rounded-2xl sm:rounded-3xl overflow-hidden shadow-xl w-full h-full min-h-0 flex flex-col items-center justify-center p-4 sm:p-6 text-center border border-white/[0.08] border-dashed">
+                          <div className="relative flex items-center justify-center mb-3">
+                            <span className="animate-ping absolute inline-flex h-16 w-16 rounded-full bg-emerald-500/20" />
+                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 relative z-10 shadow-inner">
+                              <Users className="w-6 h-6 sm:w-7 sm:h-7" />
+                            </div>
                           </div>
-                          <h4 className="text-xs sm:text-sm font-semibold text-white/80 mb-1">
+                          <h4 className="text-xs sm:text-sm font-semibold text-zinc-200 mb-1">
                             Waiting for peer to connect...
                           </h4>
-                          <p className="text-[11px] sm:text-xs text-white/40 max-w-xs">
-                            The call invite has been transmitted over the Quantum Link tunnel.
+                          <p className="text-[11px] sm:text-xs text-zinc-400 max-w-xs">
+                            The encrypted Quantum Link channel is standing by for the remote peer.
                           </p>
                         </div>
                       )}
@@ -748,41 +771,44 @@ export function CallOverlay({
 
                 </div>
 
-                {/* Bottom Control Bar (Google Meet Style) */}
-                <div className="h-16 sm:h-20 bg-[#1e2024]/98 backdrop-blur-lg border-t border-white/10 flex items-center justify-between px-3 sm:px-6 md:px-8 flex-shrink-0 z-30 shadow-2xl">
+                {/* Bottom Control Bar (Modern Elevated Island Dock) */}
+                <div className="h-16 sm:h-20 bg-[#121419]/95 backdrop-blur-2xl border-t border-white/[0.08] flex items-center justify-between px-3 sm:px-6 md:px-8 flex-shrink-0 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
                   {/* Left side: Time & Status */}
-                  <div className="hidden md:flex items-center text-xs font-medium text-white/80 w-1/4">
-                    <span className="font-mono text-sm">
-                      {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  <div className="hidden md:flex items-center text-xs font-medium text-zinc-300 w-1/4">
+                    <span className="font-mono text-sm tracking-wide text-zinc-200">
+                      {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
-                    <span className="mx-3 text-white/30">|</span>
-                    <span className="truncate text-white/60">Quantum Link • E2EE</span>
+                    <span className="mx-3 text-white/20">|</span>
+                    <span className="truncate text-zinc-400 text-xs flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      E2EE Direct P2P
+                    </span>
                   </div>
 
                   {/* Center: Controls */}
-                  <div className="flex items-center justify-center gap-2 sm:gap-3 md:gap-4 w-full md:w-auto">
+                  <div className="flex items-center justify-center gap-2 sm:gap-3 md:gap-3.5 w-full md:w-auto">
                     {/* Mic Toggle */}
                     <button 
                       onClick={toggleMic}
                       className={cn(
-                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
                         isMicMuted 
-                          ? "bg-[#ea4335] text-white hover:bg-[#d93025]" 
-                          : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
+                          ? "bg-rose-600 text-white hover:bg-rose-500 shadow-rose-600/30 border border-rose-400/40" 
+                          : "bg-white/[0.08] text-emerald-400 hover:bg-white/[0.14] border border-white/[0.08] hover:border-emerald-500/40"
                       )}
                       title={isMicMuted ? "Turn on microphone" : "Turn off microphone"}
                     >
-                      {isMicMuted ? <MicOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Mic className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />}
+                      {isMicMuted ? <MicOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Mic className="w-4 h-4 sm:w-5 sm:h-5" />}
                     </button>
 
                     {/* Video Toggle */}
                     <button 
                       onClick={toggleVideo}
                       className={cn(
-                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
                         isVideoOff
-                          ? "bg-[#ea4335] text-white hover:bg-[#d93025]" 
-                          : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
+                          ? "bg-rose-600 text-white hover:bg-rose-500 shadow-rose-600/30 border border-rose-400/40" 
+                          : "bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08]"
                       )}
                       title={isVideoOff ? "Turn on camera" : "Turn off camera"}
                     >
@@ -793,10 +819,10 @@ export function CallOverlay({
                     <button 
                       onClick={toggleScreenShare}
                       className={cn(
-                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
                         isScreenSharing
-                          ? "bg-blue-600 text-white hover:bg-blue-700 ring-2 ring-blue-400/50" 
-                          : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
+                          ? "bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/40 ring-2 ring-blue-400/50 border border-blue-400/50" 
+                          : "bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08] hover:border-blue-400/40"
                       )}
                       title={isScreenSharing ? "Stop sharing screen" : "Share screen (iPad / Desktop)"}
                     >
@@ -815,40 +841,41 @@ export function CallOverlay({
                         }
                       }}
                       className={cn(
-                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
                         viewMode === 'spotlight'
-                          ? "bg-amber-500 text-white hover:bg-amber-600 ring-2 ring-amber-400/50"
-                          : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
+                          ? "bg-amber-500 text-zinc-950 font-bold shadow-amber-500/30 border border-amber-300"
+                          : "bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08] hover:border-amber-400/40"
                       )}
                       title={viewMode === 'spotlight' ? "Exit Spotlight mode" : "Spotlight mode"}
                     >
-                      {viewMode === 'spotlight' ? <PinOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />}
+                      {viewMode === 'spotlight' ? <PinOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />}
                     </button>
 
                     {/* Minimize to PiP Toggle */}
                     <button
                       onClick={toggleMinimize}
-                      className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md bg-[#3c4043] text-white hover:bg-[#4a4d51]"
+                      className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08]"
                       title="Minimize to Picture-in-Picture (use chat & file transfer)"
                     >
-                      <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                      <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
                     </button>
 
                     {/* End Call Button */}
                     <button 
                       onClick={onEndCall} 
-                      className="w-14 sm:w-16 h-10 sm:h-11 md:h-12 rounded-full bg-[#ea4335] text-white flex items-center justify-center hover:bg-[#d93025] transition-transform active:scale-95 cursor-pointer ml-1 sm:ml-2 shadow-lg"
+                      className="h-10 sm:h-11 md:h-12 px-4 sm:px-6 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-medium flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all active:scale-95 cursor-pointer ml-1 sm:ml-2 border border-rose-400/30"
                       title="Leave call"
                     >
                       <PhoneOff className="w-4 h-4 sm:w-5 sm:h-5" />
+                      <span className="text-xs sm:text-sm font-semibold tracking-wide hidden sm:inline">Leave</span>
                     </button>
                   </div>
 
                   {/* Right side: Participant info */}
-                  <div className="hidden md:flex items-center justify-end gap-3 w-1/4 text-white/80">
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#3c4043] text-xs font-medium">
-                      <Users className="w-3.5 h-3.5 text-white/70" />
-                      <span>{totalParticipants} in call</span>
+                  <div className="hidden md:flex items-center justify-end gap-3 w-1/4 text-zinc-300">
+                    <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/[0.05] border border-white/[0.08] text-xs font-medium text-zinc-300">
+                      <Users className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>{totalParticipants} participant{totalParticipants > 1 ? 's' : ''}</span>
                     </div>
                   </div>
                 </div>
@@ -944,8 +971,8 @@ function LocalVideoTile({
 
   return (
     <div className={cn(
-      "w-full h-full flex items-center justify-center relative overflow-hidden bg-[#121316]",
-      isLocalSpeaking && !isThumbnail && "ring-2 ring-emerald-500/50"
+      "w-full h-full flex items-center justify-center relative overflow-hidden bg-[#0d0e12]",
+      isLocalSpeaking && !isThumbnail && "ring-2 ring-emerald-400/80 shadow-[0_0_24px_rgba(52,211,153,0.3)]"
     )}>
       {/* Video Element: uses object-contain so landscape iPad screen shares are NEVER cropped into portrait */}
       <video 
@@ -962,18 +989,25 @@ function LocalVideoTile({
         )}
       />
 
+      {/* Subtle Vignette Gradient for badge & control legibility */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/40 pointer-events-none" />
+
       {/* Avatar Fallback for audio or camera off */}
       {!showVideo && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#25272a]">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-[#181a22] to-[#0f1116]">
           <div className={cn(
-            "rounded-full bg-blue-600/30 border-2 flex items-center justify-center text-blue-200 font-bold uppercase shadow-inner transition-all",
-            isThumbnail ? "w-12 h-12 text-sm" : "w-24 h-24 text-3xl",
-            isLocalSpeaking ? "border-emerald-400 ring-4 ring-emerald-500/30 scale-105" : "border-blue-400/40"
+            "rounded-full bg-blue-600/20 border flex items-center justify-center text-blue-200 font-bold uppercase shadow-2xl transition-all",
+            isThumbnail ? "w-12 h-12 text-sm" : "w-22 h-22 sm:w-26 sm:h-26 text-2xl sm:text-3xl",
+            isLocalSpeaking 
+              ? "border-emerald-400 ring-4 ring-emerald-500/30 scale-105 shadow-[0_0_25px_rgba(16,185,129,0.35)]" 
+              : "border-blue-500/30 shadow-inner"
           )}>
             You
           </div>
           {!isThumbnail && isVideoOff && !hasActiveScreenTrack && (
-            <span className="text-xs text-white/50 mt-2 font-medium">Camera is off</span>
+            <span className="text-xs text-zinc-400 mt-3 font-medium bg-black/40 px-3 py-1 rounded-full border border-white/5">
+              Camera is turned off
+            </span>
           )}
         </div>
       )}
@@ -985,10 +1019,10 @@ function LocalVideoTile({
           {onToggleFit && (
             <button
               onClick={(e) => { e.stopPropagation(); onToggleFit(); }}
-              className="px-2 py-1 rounded-md bg-black/70 hover:bg-black text-xs font-medium text-white/90 backdrop-blur-md flex items-center gap-1 shadow cursor-pointer"
+              className="px-2.5 py-1.5 rounded-xl bg-black/60 hover:bg-black/85 text-xs font-medium text-white/90 backdrop-blur-xl border border-white/10 flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
               title={fitMode === 'contain' ? "Switch to Fill (zoom to edge)" : "Switch to Fit (show entire screen without cropping)"}
             >
-              {fitMode === 'contain' ? <Maximize2 className="w-3 h-3" /> : <Minimize2 className="w-3 h-3" />}
+              {fitMode === 'contain' ? <Maximize2 className="w-3.5 h-3.5 text-zinc-300" /> : <Minimize2 className="w-3.5 h-3.5 text-zinc-300" />}
               <span className="text-[11px]">{fitMode === 'contain' ? 'Fit (Full)' : 'Fill'}</span>
             </button>
           )}
@@ -997,16 +1031,16 @@ function LocalVideoTile({
           {isSpotlightStage && onUnspotlight ? (
             <button
               onClick={(e) => { e.stopPropagation(); onUnspotlight(); }}
-              className="px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 text-xs font-semibold text-white backdrop-blur-md flex items-center gap-1 shadow cursor-pointer"
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-zinc-950 backdrop-blur-xl flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
               title="Exit Spotlight Mode"
             >
-              <PinOff className="w-3 h-3" />
+              <PinOff className="w-3.5 h-3.5" />
               <span>Unpin</span>
             </button>
           ) : onSpotlight ? (
             <button
               onClick={(e) => { e.stopPropagation(); onSpotlight(); }}
-              className="p-1.5 rounded-md bg-black/70 hover:bg-amber-500 text-white backdrop-blur-md shadow cursor-pointer"
+              className="p-2 rounded-xl bg-black/60 hover:bg-amber-500 hover:text-zinc-950 text-white backdrop-blur-xl border border-white/10 shadow-md cursor-pointer transition-all"
               title="Spotlight your video"
             >
               <Pin className="w-3.5 h-3.5" />
@@ -1017,34 +1051,34 @@ function LocalVideoTile({
 
       {/* Spotlight Badge on Stage */}
       {isSpotlightStage && (
-        <div className="absolute top-3 left-3 flex items-center gap-2 bg-amber-500/90 text-black px-2.5 py-1 rounded-md text-xs font-bold shadow z-20 backdrop-blur-sm">
+        <div className="absolute top-3 left-3 flex items-center gap-2 bg-amber-500 text-zinc-950 px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg z-20 backdrop-blur-md">
           <Sparkles className="w-3.5 h-3.5" />
           <span>SPOTLIGHT • YOU</span>
-          {hasActiveScreenTrack && <span className="bg-black/20 px-1 rounded text-[10px]">SCREEN</span>}
+          {hasActiveScreenTrack && <span className="bg-black/20 px-1.5 py-0.5 rounded-md text-[10px]">SCREEN</span>}
         </div>
       )}
 
       {/* Bottom Name & Audio Status Overlay */}
       <div className={cn(
-        "absolute bottom-2 left-2 flex items-center gap-2 bg-black/65 backdrop-blur-md rounded-lg text-xs font-medium text-white shadow z-10",
+        "absolute bottom-2.5 left-2.5 flex items-center gap-2 bg-black/60 backdrop-blur-xl border border-white/10 rounded-xl text-xs font-medium text-white shadow-lg z-10",
         isThumbnail ? "px-2 py-0.5 text-[10px]" : "px-3 py-1.5"
       )}>
         {isMicMuted ? (
-          <MicOff className="w-3.5 h-3.5 text-red-400" />
+          <MicOff className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
         ) : isLocalSpeaking ? (
           <div className="flex items-center gap-0.5 h-3">
             <span className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" />
-            <span className="w-1 h-2 bg-emerald-400 rounded-full animate-pulse delay-75" />
-            <span className="w-1 h-2.5 bg-emerald-400 rounded-full animate-pulse delay-150" />
+            <span className="w-1 h-4 bg-emerald-400 rounded-full animate-pulse delay-75" />
+            <span className="w-1 h-2 bg-emerald-400 rounded-full animate-pulse delay-150" />
           </div>
         ) : (
-          <Mic className="w-3.5 h-3.5 text-emerald-400" />
+          <Mic className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
         )}
         <span className="truncate max-w-[120px]">
           You {hasActiveScreenTrack ? '(Screen)' : ''}
         </span>
         {aspectLandscape && hasActiveScreenTrack && !isThumbnail && (
-          <span className="text-[10px] text-amber-300 bg-amber-400/20 px-1 py-0.5 rounded font-mono">
+          <span className="text-[10px] text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded-md font-mono border border-amber-400/30">
             Landscape
           </span>
         )}
@@ -1128,8 +1162,8 @@ function RemoteVideoTile({
 
   return (
     <div className={cn(
-      "w-full h-full flex items-center justify-center relative overflow-hidden bg-[#121316]",
-      isRemoteSpeaking && !isThumbnail && "ring-2 ring-emerald-500/50"
+      "w-full h-full flex items-center justify-center relative overflow-hidden bg-[#0d0e12]",
+      isRemoteSpeaking && !isThumbnail && "ring-2 ring-emerald-400/80 shadow-[0_0_24px_rgba(52,211,153,0.3)]"
     )}>
       {/* Video Element: uses object-contain by default so landscape iPad screen shares never crop */}
       <video 
@@ -1145,18 +1179,25 @@ function RemoteVideoTile({
         )}
       />
 
+      {/* Subtle Vignette Gradient for badge & control legibility */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/40 pointer-events-none" />
+
       {/* Avatar Fallback for audio calls or when camera is off */}
       {!showVideo && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#25272a]">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-[#181a22] to-[#0f1116]">
           <div className={cn(
-            "rounded-full bg-emerald-600/30 border-2 flex items-center justify-center text-emerald-200 font-bold uppercase shadow-inner transition-all",
-            isThumbnail ? "w-12 h-12 text-sm" : "w-24 h-24 text-3xl",
-            isRemoteSpeaking ? "border-emerald-400 ring-4 ring-emerald-500/30 scale-105" : "border-emerald-400/40"
+            "rounded-full bg-emerald-600/20 border flex items-center justify-center text-emerald-200 font-bold uppercase shadow-2xl transition-all",
+            isThumbnail ? "w-12 h-12 text-sm" : "w-22 h-22 sm:w-26 sm:h-26 text-2xl sm:text-3xl",
+            isRemoteSpeaking 
+              ? "border-emerald-400 ring-4 ring-emerald-500/30 scale-105 shadow-[0_0_25px_rgba(16,185,129,0.35)]" 
+              : "border-emerald-500/30 shadow-inner"
           )}>
             {initials}
           </div>
           {!isThumbnail && isRemoteVideoOff && (
-            <p className="text-xs text-white/50 mt-2 font-medium">Camera turned off</p>
+            <p className="text-xs text-zinc-400 mt-3 font-medium bg-black/40 px-3 py-1 rounded-full border border-white/5">
+              Camera turned off
+            </p>
           )}
         </div>
       )}
@@ -1168,10 +1209,10 @@ function RemoteVideoTile({
           {onToggleFit && (
             <button
               onClick={(e) => { e.stopPropagation(); onToggleFit(); }}
-              className="px-2 py-1 rounded-md bg-black/70 hover:bg-black text-xs font-medium text-white/90 backdrop-blur-md flex items-center gap-1 shadow cursor-pointer"
+              className="px-2.5 py-1.5 rounded-xl bg-black/60 hover:bg-black/85 text-xs font-medium text-white/90 backdrop-blur-xl border border-white/10 flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
               title={fitMode === 'contain' ? "Switch to Fill (zoom to edge)" : "Switch to Fit (show entire screen without cropping)"}
             >
-              {fitMode === 'contain' ? <Maximize2 className="w-3 h-3" /> : <Minimize2 className="w-3 h-3" />}
+              {fitMode === 'contain' ? <Maximize2 className="w-3.5 h-3.5 text-zinc-300" /> : <Minimize2 className="w-3.5 h-3.5 text-zinc-300" />}
               <span className="text-[11px]">{fitMode === 'contain' ? 'Fit (Full)' : 'Fill'}</span>
             </button>
           )}
@@ -1180,16 +1221,16 @@ function RemoteVideoTile({
           {isSpotlightStage && onUnspotlight ? (
             <button
               onClick={(e) => { e.stopPropagation(); onUnspotlight(); }}
-              className="px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 text-xs font-semibold text-white backdrop-blur-md flex items-center gap-1 shadow cursor-pointer"
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-bold text-zinc-950 backdrop-blur-xl flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
               title="Exit Spotlight Mode"
             >
-              <PinOff className="w-3 h-3" />
+              <PinOff className="w-3.5 h-3.5" />
               <span>Unpin</span>
             </button>
           ) : onSpotlight ? (
             <button
               onClick={(e) => { e.stopPropagation(); onSpotlight(); }}
-              className="p-1.5 rounded-md bg-black/70 hover:bg-amber-500 text-white backdrop-blur-md shadow cursor-pointer"
+              className="p-2 rounded-xl bg-black/60 hover:bg-amber-500 hover:text-zinc-950 text-white backdrop-blur-xl border border-white/10 shadow-md cursor-pointer transition-all"
               title={`Spotlight ${name}`}
             >
               <Pin className="w-3.5 h-3.5" />
@@ -1200,32 +1241,32 @@ function RemoteVideoTile({
 
       {/* Spotlight Badge on Stage */}
       {isSpotlightStage && (
-        <div className="absolute top-3 left-3 flex items-center gap-2 bg-amber-500/90 text-black px-2.5 py-1 rounded-md text-xs font-bold shadow z-20 backdrop-blur-sm">
+        <div className="absolute top-3 left-3 flex items-center gap-2 bg-amber-500 text-zinc-950 px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg z-20 backdrop-blur-md">
           <Sparkles className="w-3.5 h-3.5" />
           <span>SPOTLIGHT: {name.toUpperCase()}</span>
-          {isLandscape && <span className="bg-black/20 px-1 rounded text-[10px]">LANDSCAPE</span>}
+          {isLandscape && <span className="bg-black/20 px-1.5 py-0.5 rounded-md text-[10px]">LANDSCAPE</span>}
         </div>
       )}
 
       {/* Participant Name Badge */}
       <div className={cn(
-        "absolute bottom-2 left-2 flex items-center gap-2 bg-black/65 backdrop-blur-md rounded-lg text-xs font-medium text-white shadow z-10",
+        "absolute bottom-2.5 left-2.5 flex items-center gap-2 bg-black/60 backdrop-blur-xl border border-white/10 rounded-xl text-xs font-medium text-white shadow-lg z-10",
         isThumbnail ? "px-2 py-0.5 text-[10px]" : "px-3 py-1.5"
       )}>
         {isRemoteAudioMuted ? (
-          <MicOff className="w-3.5 h-3.5 text-red-400" />
+          <MicOff className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
         ) : isRemoteSpeaking ? (
           <div className="flex items-center gap-0.5 h-3">
             <span className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" />
-            <span className="w-1 h-2 bg-emerald-400 rounded-full animate-pulse delay-75" />
-            <span className="w-1 h-2.5 bg-emerald-400 rounded-full animate-pulse delay-150" />
+            <span className="w-1 h-4 bg-emerald-400 rounded-full animate-pulse delay-75" />
+            <span className="w-1 h-2 bg-emerald-400 rounded-full animate-pulse delay-150" />
           </div>
         ) : (
-          <Volume2 className="w-3.5 h-3.5 text-white/70" />
+          <Volume2 className="w-3.5 h-3.5 text-zinc-300 flex-shrink-0" />
         )}
         <span className="truncate max-w-[120px]">{name}</span>
         {isLandscape && !isThumbnail && (
-          <span className="text-[10px] text-amber-300 bg-amber-400/20 px-1 py-0.5 rounded font-mono">
+          <span className="text-[10px] text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded-md font-mono border border-amber-400/30">
             Landscape
           </span>
         )}
