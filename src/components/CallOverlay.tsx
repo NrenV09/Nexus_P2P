@@ -500,38 +500,37 @@ export function CallOverlay({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
-              className="fixed inset-0 z-[110] bg-[#1a1b1e] w-screen h-screen overflow-hidden flex flex-col cursor-default select-none text-white font-sans"
-              style={{ top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', transform: 'none' }}
+              className="fixed inset-0 z-[110] bg-[#1a1b1e] w-full h-full max-h-screen overflow-hidden flex flex-col cursor-default select-none text-white font-sans"
             >
-              <div className="w-full h-full flex flex-col">
-                {/* Top Bar: View Mode Switcher, Call Info & Minimize Button */}
-                <div className="h-14 px-4 md:px-6 flex items-center justify-between border-b border-white/10 bg-[#202124]/90 backdrop-blur-md flex-shrink-0 z-20">
-                  <div className="flex items-center gap-3">
+              <div className="w-full h-full flex flex-col overflow-hidden">
+                {/* Top Bar: View Mode Switcher, Call Info & Quick Actions */}
+                <div className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-white/10 bg-[#202124]/95 backdrop-blur-md flex-shrink-0 z-20">
+                  <div className="flex items-center gap-2 sm:gap-3 overflow-hidden">
                     <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-xs font-mono">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      <span className="font-semibold tracking-wide">QUANTUM LINK</span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+                      <span className="font-semibold tracking-wide truncate">QUANTUM LINK</span>
                       <span className="text-white/40">•</span>
-                      <span className="text-white/70">{type === 'video' ? 'Video Meeting' : 'Encrypted Audio'}</span>
+                      <span className="text-white/70 truncate hidden xs:inline">{type === 'video' ? 'Video Meeting' : 'Encrypted Audio'}</span>
                     </div>
 
                     {viewMode === 'spotlight' && (
                       <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-medium animate-fadeIn">
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>Spotlight: {resolveParticipantName(effectiveSpotlightId || '')}</span>
+                        <span className="truncate max-w-[150px]">Spotlight: {resolveParticipantName(effectiveSpotlightId || '')}</span>
                       </div>
                     )}
                   </div>
 
-                  {/* View Mode & Minimize Controls */}
-                  <div className="flex items-center gap-2">
+                  {/* View Mode & Quick Actions Controls */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     {/* Minimize Button: Return to chat / file transfer while call stays on */}
                     <button
                       onClick={toggleMinimize}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border bg-white/5 text-white/80 border-white/10 hover:bg-white/10 hover:text-white"
+                      className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border bg-white/5 text-white/80 border-white/10 hover:bg-white/10 hover:text-white"
                       title="Minimize to Picture-in-Picture to use Secure Chat and File Transfer"
                     >
                       <Minimize2 className="w-3.5 h-3.5 text-blue-400" />
-                      <span className="hidden sm:inline">Minimize (Use Chat/Files)</span>
+                      <span className="hidden md:inline">Minimize (Chat/Files)</span>
                     </button>
 
                     {/* Spotlight / Grid Switcher */}
@@ -546,7 +545,7 @@ export function CallOverlay({
                         }
                       }}
                       className={cn(
-                        "px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border",
+                        "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border",
                         viewMode === 'spotlight'
                           ? "bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30"
                           : "bg-white/5 text-white/80 border-white/10 hover:bg-white/10"
@@ -556,27 +555,37 @@ export function CallOverlay({
                       {viewMode === 'spotlight' ? (
                         <>
                           <LayoutGrid className="w-3.5 h-3.5" />
-                          <span>Grid View</span>
+                          <span className="hidden sm:inline">Grid View</span>
                         </>
                       ) : (
                         <>
                           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                          <span>Spotlight Mode</span>
+                          <span className="hidden sm:inline">Spotlight</span>
                         </>
                       )}
+                    </button>
+
+                    {/* Quick Leave in header */}
+                    <button
+                      onClick={onEndCall}
+                      className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer bg-red-600/80 hover:bg-red-600 text-white shadow"
+                      title="Leave call"
+                    >
+                      <PhoneOff className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Leave</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Main Meeting Stage Area */}
-                <div className="flex-1 p-2 md:p-4 flex flex-col items-center justify-center overflow-hidden relative">
+                <div className="flex-1 min-h-0 w-full p-2 sm:p-3 md:p-4 flex flex-col items-center justify-center overflow-hidden relative">
                   
                   {/* 1. SPOTLIGHT MODE LAYOUT */}
                   {viewMode === 'spotlight' && (
-                    <div className="w-full h-full flex flex-col md:flex-row gap-3 overflow-hidden">
+                    <div className="w-full h-full flex flex-col md:flex-row gap-2 sm:gap-3 overflow-hidden min-h-0">
                       
                       {/* Spotlight Main Stage (Hero Area) */}
-                      <div className="flex-1 h-full min-h-[300px] flex items-center justify-center relative bg-[#131416] rounded-2xl overflow-hidden border border-white/15 shadow-2xl">
+                      <div className="flex-1 min-h-0 h-full flex items-center justify-center relative bg-[#131416] rounded-xl sm:rounded-2xl overflow-hidden border border-white/15 shadow-2xl">
                         {effectiveSpotlightId === 'local' ? (
                           <LocalVideoTile 
                             stream={localStream}
@@ -608,12 +617,12 @@ export function CallOverlay({
                       </div>
 
                       {/* Filmstrip (Thumbnails of other participants) */}
-                      <div className="h-32 md:h-full md:w-56 lg:w-64 flex flex-row md:flex-col gap-2.5 overflow-x-auto md:overflow-y-auto p-1 flex-shrink-0">
+                      <div className="h-24 sm:h-28 md:h-full md:w-56 lg:w-64 flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-y-auto p-1 flex-shrink-0 min-h-0">
                         {/* Local Thumbnail in filmstrip if not spotlighted */}
                         {effectiveSpotlightId !== 'local' && (
                           <div 
                             onClick={() => handleSpotlight('local')}
-                            className="relative min-w-[140px] md:min-w-0 md:w-full h-full md:h-36 rounded-xl overflow-hidden cursor-pointer group border border-white/10 hover:border-amber-400/60 transition-all shadow-md bg-[#25272a] flex-shrink-0"
+                            className="relative min-w-[120px] sm:min-w-[140px] md:min-w-0 md:w-full h-full md:h-32 rounded-xl overflow-hidden cursor-pointer group border border-white/10 hover:border-amber-400/60 transition-all shadow-md bg-[#25272a] flex-shrink-0"
                             title="Click to spotlight your video"
                           >
                             <LocalVideoTile 
@@ -647,7 +656,7 @@ export function CallOverlay({
                             <div 
                               key={id}
                               onClick={() => handleSpotlight(id)}
-                              className="relative min-w-[140px] md:min-w-0 md:w-full h-full md:h-36 rounded-xl overflow-hidden cursor-pointer group border border-white/10 hover:border-amber-400/60 transition-all shadow-md bg-[#25272a] flex-shrink-0"
+                              className="relative min-w-[120px] sm:min-w-[140px] md:min-w-0 md:w-full h-full md:h-32 rounded-xl overflow-hidden cursor-pointer group border border-white/10 hover:border-amber-400/60 transition-all shadow-md bg-[#25272a] flex-shrink-0"
                               title={`Click to spotlight ${resolvedName}`}
                             >
                               <RemoteVideoTile 
@@ -677,11 +686,11 @@ export function CallOverlay({
 
                   {/* 2. BALANCED GRID MODE LAYOUT */}
                   {viewMode === 'grid' && (
-                    <div className={cn("w-full h-full max-w-6xl max-h-[85vh] grid gap-3 md:gap-4 place-content-center", gridCols)}>
+                    <div className={cn("w-full h-full max-w-6xl flex-1 min-h-0 grid gap-2 sm:gap-3 md:gap-4 place-content-center p-1", gridCols)}>
                       
                       {/* Local Participant Tile */}
                       <div className={cn(
-                        "relative group bg-[#25272a] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex items-center justify-center border transition-all duration-300",
+                        "relative group bg-[#25272a] rounded-xl sm:rounded-2xl overflow-hidden shadow-md w-full h-full min-h-0 flex items-center justify-center border transition-all duration-300",
                         isLocalSpeaking ? "border-emerald-500 ring-2 ring-emerald-500/40" : "border-white/10"
                       )}>
                         <LocalVideoTile 
@@ -704,10 +713,7 @@ export function CallOverlay({
                         return (
                           <div 
                             key={id}
-                            className={cn(
-                              "relative group bg-[#25272a] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex items-center justify-center border transition-all duration-300",
-                              "border-white/10"
-                            )}
+                            className="relative group bg-[#25272a] rounded-xl sm:rounded-2xl overflow-hidden shadow-md w-full h-full min-h-0 flex items-center justify-center border transition-all duration-300 border-white/10"
                           >
                             <RemoteVideoTile 
                               id={id}
@@ -725,14 +731,14 @@ export function CallOverlay({
 
                       {/* Waiting state when alone in call */}
                       {remoteEntries.length === 0 && (
-                        <div className="relative group bg-[#202225] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex flex-col items-center justify-center p-6 text-center border border-white/10 border-dashed">
-                          <div className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-white/40 mb-3 animate-pulse">
-                            <Users className="w-7 h-7" />
+                        <div className="relative group bg-[#202225] rounded-xl sm:rounded-2xl overflow-hidden shadow-md w-full h-full min-h-0 flex flex-col items-center justify-center p-4 sm:p-6 text-center border border-white/10 border-dashed">
+                          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/5 flex items-center justify-center text-white/40 mb-2 sm:mb-3 animate-pulse">
+                            <Users className="w-6 h-6 sm:w-7 sm:h-7" />
                           </div>
-                          <h4 className="text-sm font-semibold text-white/80 mb-1">
+                          <h4 className="text-xs sm:text-sm font-semibold text-white/80 mb-1">
                             Waiting for peer to connect...
                           </h4>
-                          <p className="text-xs text-white/40 max-w-xs">
+                          <p className="text-[11px] sm:text-xs text-white/40 max-w-xs">
                             The call invite has been transmitted over the Quantum Link tunnel.
                           </p>
                         </div>
@@ -743,7 +749,7 @@ export function CallOverlay({
                 </div>
 
                 {/* Bottom Control Bar (Google Meet Style) */}
-                <div className="h-20 bg-[#202124] border-t border-white/10 flex items-center justify-between px-4 md:px-8 flex-shrink-0 z-20">
+                <div className="h-16 sm:h-20 bg-[#1e2024]/98 backdrop-blur-lg border-t border-white/10 flex items-center justify-between px-3 sm:px-6 md:px-8 flex-shrink-0 z-30 shadow-2xl">
                   {/* Left side: Time & Status */}
                   <div className="hidden md:flex items-center text-xs font-medium text-white/80 w-1/4">
                     <span className="font-mono text-sm">
@@ -754,47 +760,47 @@ export function CallOverlay({
                   </div>
 
                   {/* Center: Controls */}
-                  <div className="flex items-center justify-center gap-3 w-full md:w-2/4">
+                  <div className="flex items-center justify-center gap-2 sm:gap-3 md:gap-4 w-full md:w-auto">
                     {/* Mic Toggle */}
                     <button 
                       onClick={toggleMic}
                       className={cn(
-                        "w-12 h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
                         isMicMuted 
                           ? "bg-[#ea4335] text-white hover:bg-[#d93025]" 
                           : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
                       )}
                       title={isMicMuted ? "Turn on microphone" : "Turn off microphone"}
                     >
-                      {isMicMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                      {isMicMuted ? <MicOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Mic className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />}
                     </button>
 
                     {/* Video Toggle */}
                     <button 
                       onClick={toggleVideo}
                       className={cn(
-                        "w-12 h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
                         isVideoOff
                           ? "bg-[#ea4335] text-white hover:bg-[#d93025]" 
                           : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
                       )}
                       title={isVideoOff ? "Turn on camera" : "Turn off camera"}
                     >
-                      {isVideoOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                      {isVideoOff ? <VideoOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Video className="w-4 h-4 sm:w-5 sm:h-5" />}
                     </button>
 
                     {/* Screen Share Toggle */}
                     <button 
                       onClick={toggleScreenShare}
                       className={cn(
-                        "w-12 h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
                         isScreenSharing
                           ? "bg-blue-600 text-white hover:bg-blue-700 ring-2 ring-blue-400/50" 
                           : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
                       )}
                       title={isScreenSharing ? "Stop sharing screen" : "Share screen (iPad / Desktop)"}
                     >
-                      <MonitorUp className="w-5 h-5" />
+                      <MonitorUp className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
 
                     {/* View Mode (Grid vs Spotlight) Toggle */}
@@ -809,32 +815,32 @@ export function CallOverlay({
                         }
                       }}
                       className={cn(
-                        "w-12 h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
                         viewMode === 'spotlight'
                           ? "bg-amber-500 text-white hover:bg-amber-600 ring-2 ring-amber-400/50"
                           : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
                       )}
                       title={viewMode === 'spotlight' ? "Exit Spotlight mode" : "Spotlight mode"}
                     >
-                      {viewMode === 'spotlight' ? <PinOff className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+                      {viewMode === 'spotlight' ? <PinOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />}
                     </button>
 
                     {/* Minimize to PiP Toggle */}
                     <button
                       onClick={toggleMinimize}
-                      className="w-12 h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md bg-[#3c4043] text-white hover:bg-[#4a4d51]"
+                      className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md bg-[#3c4043] text-white hover:bg-[#4a4d51]"
                       title="Minimize to Picture-in-Picture (use chat & file transfer)"
                     >
-                      <Minimize2 className="w-5 h-5" />
+                      <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
 
                     {/* End Call Button */}
                     <button 
                       onClick={onEndCall} 
-                      className="w-16 h-12 rounded-full bg-[#ea4335] text-white flex items-center justify-center hover:bg-[#d93025] transition-transform active:scale-95 cursor-pointer ml-2 shadow-lg"
+                      className="w-14 sm:w-16 h-10 sm:h-11 md:h-12 rounded-full bg-[#ea4335] text-white flex items-center justify-center hover:bg-[#d93025] transition-transform active:scale-95 cursor-pointer ml-1 sm:ml-2 shadow-lg"
                       title="Leave call"
                     >
-                      <PhoneOff className="w-5 h-5" />
+                      <PhoneOff className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
                   </div>
 
