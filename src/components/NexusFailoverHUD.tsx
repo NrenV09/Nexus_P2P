@@ -16,7 +16,8 @@ import {
   Radio,
   Lock,
   FlaskConical,
-  WifiOff
+  WifiOff,
+  X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { NexusPeer, sortPeersDeterministically, hasMajorityQuorum } from '../lib/nexusFailover';
@@ -34,6 +35,10 @@ interface NexusFailoverHUDProps {
   isSimulation?: boolean;
   onToggleSimulation?: () => void;
   onNavigateToConnect?: () => void;
+  onClose?: () => void;
+  onTransferHostControl?: (peerId: string) => void;
+  onGracefulHostDrop?: () => void;
+  onNetworkSplit?: () => void;
 }
 
 export function NexusFailoverHUD({
@@ -48,6 +53,10 @@ export function NexusFailoverHUD({
   isSimulation = false,
   onToggleSimulation,
   onNavigateToConnect,
+  onClose,
+  onTransferHostControl,
+  onGracefulHostDrop,
+  onNetworkSplit,
 }: NexusFailoverHUDProps) {
   const [internalSimMode, setInternalSimMode] = useState<boolean>(isSimulation);
 
@@ -604,7 +613,10 @@ export function NexusFailoverHUD({
                   <th className="py-2 px-2 sm:px-3 hidden sm:table-cell">Latency</th>
                   <th className="py-2 px-2 sm:px-3">Role</th>
                   <th className="py-2 px-2 sm:px-3 hidden sm:table-cell">Failover Rank</th>
-                  <th className="py-2 px-2 sm:px-3 text-right">Status</th>
+                  <th className="py-2 px-2 sm:px-3 text-center">Status</th>
+                  {role === 'host' && (
+                    <th className="py-2 px-2 sm:px-3 text-right">Host Control</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -698,7 +710,7 @@ export function NexusFailoverHUD({
                       </td>
 
                       {/* Status */}
-                      <td className="py-2.5 sm:py-3 px-2 sm:px-3 text-right">
+                      <td className="py-2.5 sm:py-3 px-2 sm:px-3 text-center">
                         <span className={cn(
                           "inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold",
                           isDead 
@@ -714,6 +726,31 @@ export function NexusFailoverHUD({
                           {isDead ? "DEAD" : isStandalone ? "STANDALONE" : "ONLINE"}
                         </span>
                       </td>
+
+                      {/* Host Control Actions */}
+                      {role === 'host' && (
+                        <td className="py-2.5 sm:py-3 px-2 sm:px-3 text-right">
+                          {!isHost && !isDead && (
+                            <button
+                              onClick={() => {
+                                if (onTransferHostControl) {
+                                  onTransferHostControl(peer.peerId);
+                                } else {
+                                  handleSimulateGracefulHandoff();
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded-xl bg-accent text-white hover:bg-accent/90 font-medium text-[10px] transition-all inline-flex items-center gap-1 cursor-pointer shadow-sm active:scale-95"
+                              title={`Transfer Host control to ${peer.username} and become 1st heir`}
+                            >
+                              <Crown className="w-3 h-3" />
+                              <span>Transfer Host</span>
+                            </button>
+                          )}
+                          {isHost && (
+                            <span className="text-[10px] text-muted font-mono italic">Current Host</span>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -889,8 +926,76 @@ export function NexusFailoverHUD({
 
                 </div>
               </>
+            ) : role === 'host' ? (
+              /* Live Host Authority Controls */
+              <div className="flex flex-col gap-3 py-1">
+                <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                  <div className="flex items-center gap-2">
+                    <Crown className="w-4 h-4 text-accent" />
+                    <span className="text-xs font-bold text-text uppercase tracking-wider">Host Authority Controls</span>
+                  </div>
+                  <span className="text-[9px] px-2 py-0.5 rounded-full font-mono font-bold bg-accent/15 text-accent border border-accent/20">
+                    Host Exclusive
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    onClick={() => {
+                      if (onGracefulHostDrop) {
+                        onGracefulHostDrop();
+                      } else {
+                        handleSimulateGracefulHandoff();
+                      }
+                    }}
+                    className="w-full text-left p-3 rounded-2xl bg-white/40 dark:bg-white/5 hover:bg-accent/10 border border-white/40 dark:border-white/10 hover:border-accent/30 transition-all group cursor-pointer shadow-sm active:scale-[0.99]"
+                  >
+                    <div className="flex items-center justify-between text-xs font-bold text-accent mb-1">
+                      <span className="flex items-center gap-1.5">
+                        <Crown className="w-3.5 h-3.5 text-accent" /> Graceful Host Drop
+                      </span>
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform flex-shrink-0" />
+                    </div>
+                    <div className="text-[10px] sm:text-[11px] text-muted leading-snug">
+                      Step down as Host and immediately transfer host access to the 1st joiner (heir).
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (onNetworkSplit) {
+                        onNetworkSplit();
+                      } else {
+                        handleSimulatePartition();
+                      }
+                    }}
+                    className="w-full text-left p-3 rounded-2xl bg-white/40 dark:bg-white/5 hover:bg-purple-500/10 border border-white/40 dark:border-white/10 hover:border-purple-500/30 transition-all group cursor-pointer shadow-sm active:scale-[0.99]"
+                  >
+                    <div className="flex items-center justify-between text-xs font-bold text-purple-500 mb-1">
+                      <span className="flex items-center gap-1.5">
+                        <WifiOff className="w-3.5 h-3.5" /> Network Split Test
+                      </span>
+                      <ShieldCheck className="w-4 h-4 group-hover:scale-110 transition-transform flex-shrink-0" />
+                    </div>
+                    <div className="text-[10px] sm:text-[11px] text-muted leading-snug">
+                      Simulate network partition. Validates that split sub-networks prevent split-brain without majority quorum.
+                    </div>
+                  </button>
+                </div>
+
+                <div className="pt-2 border-t border-white/10 flex items-center justify-between">
+                  <span className="text-[10px] text-muted font-mono">Sandbox Scenarios</span>
+                  <button
+                    onClick={handleToggleSim}
+                    className="px-2.5 py-1 rounded-xl bg-white/40 dark:bg-white/10 hover:bg-accent hover:text-white text-[10px] font-semibold text-text transition-all flex items-center gap-1.5 cursor-pointer border border-white/20"
+                  >
+                    <FlaskConical className="w-3 h-3" />
+                    <span>Enter Simulation</span>
+                  </button>
+                </div>
+              </div>
             ) : (
-              /* Locked State in Live Mode */
+              /* Locked State in Live Mode for Joiners */
               <div className="flex flex-col items-center text-center py-4 sm:py-6 px-2 sm:px-3 gap-3">
                 <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 flex items-center justify-center text-muted">
                   <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-muted" />

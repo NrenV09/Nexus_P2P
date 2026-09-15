@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   PhoneOff, 
@@ -6,15 +6,68 @@ import {
   MicOff, 
   Video, 
   VideoOff, 
-  MoreVertical, 
   MonitorUp,
-  MessageSquare,
   Users,
-  Info,
   Volume2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { UserProfile } from '../types';
+
+function useAudioActivity(stream: MediaStream | null, isMuted: boolean = false) {
+  const [speaking, setSpeaking] = useState(false);
+  const [volumeLevel, setVolumeLevel] = useState(0);
+
+  useEffect(() => {
+    if (!stream || isMuted) {
+      setSpeaking(false);
+      setVolumeLevel(0);
+      return;
+    }
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0 || !audioTracks.some(t => t.enabled && t.readyState === 'live')) {
+      setSpeaking(false);
+      setVolumeLevel(0);
+      return;
+    }
+
+    let animId: number;
+    let audioCtx: AudioContext | null = null;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      audioCtx = new AudioCtx();
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const check = () => {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        setVolumeLevel(avg);
+        setSpeaking(avg > 14);
+        animId = requestAnimationFrame(check);
+      };
+      check();
+    } catch (e) {
+      // AudioContext may be restricted in some iframe contexts
+    }
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+      if (audioCtx && audioCtx.state !== 'closed') {
+        audioCtx.close().catch(() => {});
+      }
+    };
+  }, [stream, isMuted]);
+
+  return { speaking, volumeLevel };
+}
 
 export function CallOverlay({
   active,
@@ -23,6 +76,7 @@ export function CallOverlay({
   remoteStreams,
   peerProfiles,
   peerTrackStates,
+  getPeerName,
   onEndCall,
   onToggleTrack,
   onRequestAddTrack
@@ -33,6 +87,7 @@ export function CallOverlay({
   remoteStreams: Record<string, MediaStream>;
   peerProfiles?: Record<string, UserProfile>;
   peerTrackStates?: Record<string, { video?: boolean; audio?: boolean }>;
+  getPeerName?: (peerId: string) => string;
   onEndCall: () => void;
   onToggleTrack?: (kind: 'audio' | 'video', enabled: boolean) => void;
   onRequestAddTrack?: (track: MediaStreamTrack) => void;
@@ -40,7 +95,11 @@ export function CallOverlay({
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(type === 'audio');
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  const { speaking: isLocalSpeaking } = useAudioActivity(localStream, isMicMuted);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -112,6 +171,74 @@ export function CallOverlay({
     onToggleTrack?.('video', newEnabled);
   };
 
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      if (screenTrackRef.current) {
+        screenTrackRef.current.stop();
+        screenTrackRef.current = null;
+      }
+      setIsScreenSharing(false);
+      // Resume camera track
+      if (localStream) {
+        const camTrack = localStream.getVideoTracks().find(t => t !== screenTrackRef.current && t.readyState === 'live');
+        if (camTrack) {
+          camTrack.enabled = true;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = localStream;
+            localVideoRef.current.play().catch(() => {});
+          }
+          onRequestAddTrack?.(camTrack);
+        }
+      }
+      return;
+    }
+
+    try {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        console.warn("Screen sharing not supported on this device/browser.");
+        return;
+      }
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const screenTrack = displayStream.getVideoTracks()[0];
+      if (!screenTrack) return;
+
+      screenTrackRef.current = screenTrack;
+      setIsScreenSharing(true);
+      setIsVideoOff(false);
+
+      if (localStream) {
+        localStream.addTrack(screenTrack);
+      }
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = new MediaStream([screenTrack]);
+        localVideoRef.current.play().catch(() => {});
+      }
+
+      onRequestAddTrack?.(screenTrack);
+      onToggleTrack?.('video', true);
+
+      screenTrack.onended = () => {
+        setIsScreenSharing(false);
+        screenTrackRef.current = null;
+        if (localStream) {
+          localStream.removeTrack(screenTrack);
+          const camTrack = localStream.getVideoTracks().find(t => t.readyState === 'live');
+          if (camTrack) {
+            camTrack.enabled = true;
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = localStream;
+              localVideoRef.current.play().catch(() => {});
+            }
+            onRequestAddTrack?.(camTrack);
+          }
+        }
+      };
+    } catch (err) {
+      console.warn("Screen share request cancelled or failed:", err);
+    }
+  };
+
   // Google Meet layout logic
   const remoteEntries = Object.entries(remoteStreams);
   const totalParticipants = 1 + remoteEntries.length;
@@ -135,7 +262,10 @@ export function CallOverlay({
             <div className={cn("w-full h-full max-w-6xl max-h-[85vh] grid gap-3 md:gap-4 place-content-center", gridCols)}>
               
               {/* Local Participant Tile */}
-              <div className="relative group bg-[#3c4043] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex items-center justify-center border border-white/10">
+              <div className={cn(
+                "relative group bg-[#3c4043] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex items-center justify-center border transition-all duration-300",
+                isLocalSpeaking ? "border-emerald-500 ring-2 ring-emerald-500/40" : "border-white/10"
+              )}>
                 {/* Keep video element permanently mounted to prevent decoder pipeline restart */}
                 <video 
                   ref={localVideoRef}
@@ -143,7 +273,8 @@ export function CallOverlay({
                   playsInline 
                   muted 
                   className={cn(
-                    "w-full h-full object-cover transform -scale-x-100 transition-opacity duration-150",
+                    "w-full h-full object-cover transition-opacity duration-150",
+                    isScreenSharing ? "transform-none" : "transform -scale-x-100",
                     (isVideoOff || !hasActiveVideoTrack) ? "opacity-0 pointer-events-none absolute inset-0" : "opacity-100"
                   )}
                 />
@@ -151,7 +282,10 @@ export function CallOverlay({
                 {/* Avatar Fallback for audio or camera off */}
                 {(isVideoOff || !hasActiveVideoTrack) && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#28292c]">
-                    <div className="w-24 h-24 rounded-full bg-blue-600/30 border-2 border-blue-400/40 flex items-center justify-center text-3xl text-blue-200 font-bold uppercase shadow-inner">
+                    <div className={cn(
+                      "w-24 h-24 rounded-full bg-blue-600/30 border-2 flex items-center justify-center text-3xl text-blue-200 font-bold uppercase shadow-inner transition-all",
+                      isLocalSpeaking ? "border-emerald-400 ring-4 ring-emerald-500/30 scale-105" : "border-blue-400/40"
+                    )}>
                       You
                     </div>
                     {isVideoOff && (
@@ -164,23 +298,28 @@ export function CallOverlay({
                 <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white shadow z-10">
                   {isMicMuted ? (
                     <MicOff className="w-3.5 h-3.5 text-red-400" />
+                  ) : isLocalSpeaking ? (
+                    <div className="flex items-center gap-0.5 h-3">
+                      <span className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" />
+                      <span className="w-1 h-2 bg-emerald-400 rounded-full animate-pulse delay-75" />
+                      <span className="w-1 h-2.5 bg-emerald-400 rounded-full animate-pulse delay-150" />
+                    </div>
                   ) : (
                     <Mic className="w-3.5 h-3.5 text-emerald-400" />
                   )}
-                  <span>You (Local)</span>
+                  <span>You {isScreenSharing ? '(Sharing Screen)' : '(Local)'}</span>
                 </div>
               </div>
 
               {/* Remote Participants */}
               {remoteEntries.map(([id, stream]) => {
-                const profile = peerProfiles?.[id];
-                const name = profile?.username || 'Remote Peer';
+                const resolvedName = getPeerName?.(id) || peerProfiles?.[id]?.username || 'Remote Node';
                 const trackState = peerTrackStates?.[id];
                 return (
                   <StreamView 
                     key={id} 
                     id={id} 
-                    name={name}
+                    name={resolvedName}
                     stream={stream} 
                     isRemoteVideoOff={trackState?.video === false || (type === 'audio' && trackState?.video !== true)}
                     isRemoteAudioMuted={trackState?.audio === false}
@@ -247,6 +386,20 @@ export function CallOverlay({
                 {(isVideoOff || !hasActiveVideoTrack) ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
               </button>
 
+              {/* Screen Share Toggle */}
+              <button 
+                onClick={toggleScreenShare}
+                className={cn(
+                  "w-12 h-12 rounded-full flex items-center justify-center transition-transform active:scale-95 cursor-pointer shadow-md",
+                  isScreenSharing
+                    ? "bg-blue-600 text-white hover:bg-blue-700 ring-2 ring-blue-400/50" 
+                    : "bg-[#3c4043] text-white hover:bg-[#4a4d51]"
+                )}
+                title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+              >
+                <MonitorUp className="w-5 h-5" />
+              </button>
+
               {/* End Call Button */}
               <button 
                 onClick={onEndCall} 
@@ -289,6 +442,8 @@ function StreamView({
   const audioRef = useRef<HTMLAudioElement>(null);
   const [hasVideoTrack, setHasVideoTrack] = useState(false);
 
+  const { speaking: isRemoteSpeaking } = useAudioActivity(stream, isRemoteAudioMuted);
+
   useEffect(() => {
     const checkTracks = () => {
       const vTracks = stream.getVideoTracks();
@@ -322,19 +477,23 @@ function StreamView({
     }
   }, [isRemoteVideoOff, hasVideoTrack]);
 
-  const initials = (name || id || "Peer").substring(0, 2).toUpperCase();
+  const initials = (name || id || "Node").substring(0, 2).toUpperCase();
   const showVideo = hasVideoTrack && !isRemoteVideoOff;
 
   return (
-    <div className="relative group bg-[#3c4043] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex items-center justify-center border border-white/10">
-      {/* Dedicated audio element to guarantee remote audio plays even if video is paused */}
+    <div className={cn(
+      "relative group bg-[#3c4043] rounded-2xl overflow-hidden shadow-md h-full min-h-[200px] flex items-center justify-center border transition-all duration-300",
+      isRemoteSpeaking ? "border-emerald-500 ring-2 ring-emerald-500/40" : "border-white/10"
+    )}>
+      {/* Dedicated audio element: handles ALL remote audio playback reliably */}
       <audio ref={audioRef} autoPlay playsInline />
 
-      {/* Video Element kept permanently mounted */}
+      {/* Video Element: MUTED so audio doesn't play twice/echo! */}
       <video 
         ref={videoRef} 
         autoPlay 
         playsInline 
+        muted
         className={cn(
           "w-full h-full object-cover transition-opacity duration-150",
           !showVideo ? "opacity-0 pointer-events-none absolute inset-0" : "opacity-100"
@@ -344,7 +503,10 @@ function StreamView({
       {/* Avatar Fallback for audio calls or when camera is off */}
       {!showVideo && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#28292c]">
-          <div className="w-24 h-24 rounded-full bg-emerald-600/30 border-2 border-emerald-400/40 flex items-center justify-center text-3xl text-emerald-200 font-bold uppercase shadow-inner">
+          <div className={cn(
+            "w-24 h-24 rounded-full bg-emerald-600/30 border-2 flex items-center justify-center text-3xl text-emerald-200 font-bold uppercase shadow-inner transition-all",
+            isRemoteSpeaking ? "border-emerald-400 ring-4 ring-emerald-500/30 scale-105" : "border-emerald-400/40"
+          )}>
             {initials}
           </div>
           {isRemoteVideoOff && (
@@ -357,8 +519,14 @@ function StreamView({
       <div className="absolute bottom-3 left-3 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white shadow z-10">
         {isRemoteAudioMuted ? (
           <MicOff className="w-3.5 h-3.5 text-red-400" />
+        ) : isRemoteSpeaking ? (
+          <div className="flex items-center gap-0.5 h-3">
+            <span className="w-1 h-3 bg-emerald-400 rounded-full animate-pulse" />
+            <span className="w-1 h-2 bg-emerald-400 rounded-full animate-pulse delay-75" />
+            <span className="w-1 h-2.5 bg-emerald-400 rounded-full animate-pulse delay-150" />
+          </div>
         ) : (
-          <Volume2 className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+          <Volume2 className="w-3.5 h-3.5 text-white/70" />
         )}
         <span>{name}</span>
       </div>

@@ -1,15 +1,16 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { X, User, Calendar, Info } from 'lucide-react';
+import { X, User, Calendar, Info, Phone, Video } from 'lucide-react';
 import { UserProfile } from '../types';
 import { cn } from '../lib/utils';
 
 interface ViewProfileModalProps {
   profile: UserProfile;
   onClose: () => void;
+  onStartCall?: (type: 'audio' | 'video') => void;
 }
 
-export function ViewProfileModal({ profile, onClose }: ViewProfileModalProps) {
+export function ViewProfileModal({ profile, onClose, onStartCall }: ViewProfileModalProps) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <motion.div 
@@ -38,7 +39,7 @@ export function ViewProfileModal({ profile, onClose }: ViewProfileModalProps) {
           </div>
           <button 
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-full transition-colors"
+            className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-full transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -48,7 +49,7 @@ export function ViewProfileModal({ profile, onClose }: ViewProfileModalProps) {
           {/* Avatar Display */}
           <div className="flex flex-col items-center gap-4">
             <div className={cn(
-              "w-32 h-32 rounded-full flex items-center justify-center text-white text-5xl font-bold shadow-xl border-4 border-white dark:border-zinc-800",
+              "w-28 h-28 rounded-full flex items-center justify-center text-white text-5xl font-bold shadow-xl border-4 border-white dark:border-zinc-800",
               profile.avatarColor || "bg-accent"
             )}>
               {profile.username.charAt(0).toUpperCase() || '?'}
@@ -75,10 +76,28 @@ export function ViewProfileModal({ profile, onClose }: ViewProfileModalProps) {
           </div>
         </div>
 
-        <div className="p-4 bg-zinc-50/50 dark:bg-zinc-800/20 border-t border-gray-100 dark:border-white/5">
+        <div className="p-4 bg-zinc-50/50 dark:bg-zinc-800/20 border-t border-gray-100 dark:border-white/5 flex gap-2">
+          {onStartCall && (
+            <>
+              <button 
+                onClick={() => { onClose(); onStartCall('audio'); }}
+                className="flex-1 px-4 py-2.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-95"
+              >
+                <Phone className="w-4 h-4" />
+                Voice Call
+              </button>
+              <button 
+                onClick={() => { onClose(); onStartCall('video'); }}
+                className="flex-1 px-4 py-2.5 text-xs font-semibold bg-accent hover:bg-accent/90 text-white rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-95"
+              >
+                <Video className="w-4 h-4" />
+                Video Call
+              </button>
+            </>
+          )}
           <button 
             onClick={onClose}
-            className="w-full px-4 py-3 text-sm font-semibold bg-zinc-100 dark:bg-white/5 text-text hover:bg-zinc-200 dark:hover:bg-white/10 rounded-xl transition-all"
+            className="px-4 py-2.5 text-xs font-semibold bg-zinc-100 dark:bg-white/5 text-text hover:bg-zinc-200 dark:hover:bg-white/10 rounded-xl transition-all cursor-pointer"
           >
             Close
           </button>

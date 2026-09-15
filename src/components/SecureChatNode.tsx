@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, Users, Send, Video, Phone, Mic, Square, Trash2, AlertCircle, X } from 'lucide-react';
+import { Shield, Users, Send, Video, Phone, Mic, Square, Trash2, AlertCircle, X, Gauge } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ChatMessage, NodeRole } from '../types';
 import { VoiceMessagePlayer } from './VoiceMessagePlayer';
@@ -12,6 +12,9 @@ interface SecureChatNodeProps {
   role: NodeRole;
   onClickProfile?: (senderId: string) => void;
   startCall?: (type: 'audio' | 'video') => void;
+  bandwidthOptimized?: boolean;
+  onToggleBandwidthOptimized?: () => void;
+  isCallActive?: boolean;
 }
 
 // Find best supported audio mime type across browsers
@@ -41,7 +44,10 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
   connectedPeers, 
   role,
   onClickProfile,
-  startCall
+  startCall,
+  bandwidthOptimized = false,
+  onToggleBandwidthOptimized,
+  isCallActive = false,
 }) => {
   const [text, setText] = useState("");
   const isConnected = connectedPeers > 0;
@@ -292,14 +298,41 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
             Secure Group Chat
           </h2>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           {isConnected && (
-            <div className="flex items-center gap-1 mr-2 border-r border-white/20 dark:border-white/10 pr-3">
-              <button onClick={() => startCall?.('audio')} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-muted hover:text-text cursor-pointer" title="Start P2P Voice Call">
-                <Phone className="w-4 h-4" />
+            <div className="flex items-center gap-1.5 mr-1 sm:mr-2 border-r border-white/20 dark:border-white/10 pr-2 sm:pr-3">
+              <button 
+                onClick={() => startCall?.('audio')} 
+                className="px-2 py-1 rounded-xl bg-white/40 dark:bg-white/10 hover:bg-emerald-500 hover:text-white transition-all text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs border border-white/20 active:scale-95"
+                title="Start Group Audio Call"
+              >
+                <Phone className="w-3.5 h-3.5 text-emerald-500 group-hover:text-white" />
+                <span className="hidden sm:inline text-[11px]">Group Audio</span>
               </button>
-              <button onClick={() => startCall?.('video')} className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-muted hover:text-text cursor-pointer" title="Start P2P Video Call">
-                <Video className="w-4 h-4" />
+              
+              <button 
+                onClick={() => startCall?.('video')} 
+                className="px-2 py-1 rounded-xl bg-white/40 dark:bg-white/10 hover:bg-accent hover:text-white transition-all text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs border border-white/20 active:scale-95"
+                title="Start Group Video Call"
+              >
+                <Video className="w-3.5 h-3.5 text-accent group-hover:text-white" />
+                <span className="hidden sm:inline text-[11px]">Group Video</span>
+              </button>
+
+              <button 
+                onClick={onToggleBandwidthOptimized} 
+                className={cn(
+                  "px-2 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs border transition-all active:scale-95",
+                  bandwidthOptimized 
+                    ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40" 
+                    : "bg-white/40 dark:bg-white/10 text-muted hover:text-text border-white/20"
+                )}
+                title={bandwidthOptimized ? "Bandwidth Saver ACTIVE (360p / 15fps capped)" : "Bandwidth Saver: Caps bitrate & fps when >=3 participants connect"}
+              >
+                <Gauge className="w-3.5 h-3.5" />
+                <span className="hidden md:inline text-[11px]">
+                  {bandwidthOptimized ? "Saver: ON" : "Bandwidth Saver"}
+                </span>
               </button>
             </div>
           )}

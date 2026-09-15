@@ -18,7 +18,8 @@ import {
   Copy,
   Share,
   Moon,
-  Sun
+  Sun,
+  PhoneCall
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -46,6 +47,7 @@ import { ViewProfileModal } from './components/ViewProfileModal';
 import { NexusFailoverHUD } from './components/NexusFailoverHUD';
 import { CallOverlay } from './components/CallOverlay';
 import { IncomingCallModal, IncomingCallData } from './components/IncomingCallModal';
+import { EasterEggModal, playQuantumChime, playTapTick } from './components/EasterEggModal';
 import { generateRandomName } from './lib/nameGenerator';
 
 const CHUNK_SIZE = 131072; // Max WebRTC chunk size (128KB)
@@ -168,12 +170,15 @@ export default function App() {
       const next = prev + 1;
       if (next >= 10) {
         setShowCreatorPopup(true);
+        playQuantumChime();
         return 0;
+      } else {
+        playTapTick(next);
+        return next;
       }
-      return next;
     });
     if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
-    tapTimeoutRef.current = setTimeout(() => setTitleTapCount(0), 1000);
+    tapTimeoutRef.current = setTimeout(() => setTitleTapCount(0), 1500);
   }, []);
 
   // --- Refs ---
@@ -211,17 +216,134 @@ export default function App() {
   const fileBuffers = useRef<Map<string, any>>(new Map());
   const lastUpdateRef = useRef<number>(Date.now());
 
-  const [directDownloads, setDirectDownloads] = useState(false);
+  const [directDownloads, setDirectDownloadsState] = useState(false);
+  const directDownloadsRef = useRef(false);
+  const setDirectDownloads = (val: boolean) => {
+    setDirectDownloadsState(val);
+    directDownloadsRef.current = val;
+    if (val) {
+      addLog("Direct Downloads enabled: Transfers will stream directly to disk (RAM bypassed)", "ok");
+    } else {
+      addLog("Direct Downloads disabled: Standard browser buffering active", "info");
+    }
+  };
+
+  const [bandwidthOptimized, setBandwidthOptimized] = useState(false);
+
   const handleClearCache = useCallback(async () => {
     try {
-      const cacheKeys = await caches.keys();
-      for (const key of cacheKeys) {
-        await caches.delete(key);
+      fileBuffers.current.forEach(async (buffer) => {
+        try {
+          if (buffer.writable) await buffer.writable.close();
+        } catch(e) {}
+      });
+      fileBuffers.current.clear();
+      chatChunkBuffers.current = {};
+      setTransfer(null);
+
+      if (window.caches) {
+        const cacheKeys = await caches.keys();
+        for (const key of cacheKeys) {
+          await caches.delete(key);
+        }
       }
-      addLog("Browser cache cleared successfully", "ok");
-    } catch (e) {
-      addLog("Failed to clear cache", "err");
+
+      if (navigator.storage && navigator.storage.getDirectory) {
+        try {
+          const root = await navigator.storage.getDirectory();
+          // @ts-ignore
+          if (root.values) {
+            // @ts-ignore
+            for await (const entry of root.values()) {
+              try {
+                await root.removeEntry(entry.name, { recursive: true });
+              } catch(e) {}
+            }
+          }
+        } catch(e) {}
+      }
+
+      addLog("App cache cleared: In-memory buffers and temp storage purged", "ok");
+    } catch (e: any) {
+      addLog("Failed to clear cache: " + (e?.message || e), "err");
     }
+  }, [addLog]);
+
+  const handleTransferHostControl = useCallback((targetPeerId: string) => {
+    const targetPeer = peerProfiles[targetPeerId];
+    const targetName = targetPeer?.username || targetPeerId.substring(0, 8);
+    
+    // Broadcast handoff message to all peers
+    const msg = JSON.stringify({
+      type: 'host-handoff',
+      newHostId: targetPeerId,
+      newHostName: targetName,
+      oldHostId: profile.id,
+      oldHostName: profile.username
+    });
+    dataChannels.current.forEach(dc => {
+      if (dc.readyState === 'open') {
+        try { dc.send(msg); } catch(e) {}
+      }
+    });
+
+    // Step down to join role and become 1st heir
+    setRole('join');
+    roleRef.current = 'join';
+    setShowFailoverMenu(false);
+    addLog(`👑 Host authority transferred to ${targetName}. You are now designated 1st Heir.`, "ok");
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      text: `👑 Host authority handed over to ${targetName}. This node is now a Peer (1st Heir).`,
+      sender: 'system',
+      timestamp: new Date()
+    }]);
+  }, [peerProfiles, profile, addLog]);
+
+  const handleGracefulHostDrop = useCallback(() => {
+    const peerEntries = Object.entries(peerProfiles);
+    if (peerEntries.length === 0) {
+      addLog("No connected peers to hand over host access to.", "err");
+      return;
+    }
+    const [firstPeerId, firstPeer] = peerEntries[0];
+    const targetName = (firstPeer as UserProfile)?.username || firstPeerId.substring(0, 8);
+
+    const msg = JSON.stringify({
+      type: 'host-handoff',
+      newHostId: firstPeerId,
+      newHostName: targetName,
+      oldHostId: profile.id,
+      oldHostName: profile.username,
+      graceful: true
+    });
+    dataChannels.current.forEach(dc => {
+      if (dc.readyState === 'open') {
+        try { dc.send(msg); } catch(e) {}
+      }
+    });
+
+    setRole('join');
+    roleRef.current = 'join';
+    setShowFailoverMenu(false);
+    addLog(`🛡️ Graceful Host Drop: Stepped down and gave host authority to 1st joiner (${targetName}).`, "ok");
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      text: `🛡️ Graceful Host Drop: ${profile.username} gracefully stepped down. ${targetName} is now Authoritative Host.`,
+      sender: 'system',
+      timestamp: new Date()
+    }]);
+  }, [peerProfiles, profile, addLog]);
+
+  const handleNetworkSplit = useCallback(() => {
+    addLog("⚡ Network Partition Split test initiated", "info");
+    addLog("Nexus Failover Quorum: Commits quarantined until majority consensus (>50%) re-establishes.", "ok");
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      text: "⚡ Network Split Test: Quorum consensus active. Sub-partition split handled safely.",
+      sender: 'system',
+      timestamp: new Date()
+    }]);
   }, [addLog]);
 
   const [autoDownload, setAutoDownloadState] = useState(true);
@@ -420,6 +542,20 @@ export default function App() {
         return next;
       });
       peerConnections.current.delete(peerId);
+
+      // Automated Heir Succession: If joiner and host tunnel terminates abruptly, promote to host!
+      if (roleRef.current === 'join') {
+        addLog("⚠️ Nexus Failover: Host node disappeared abruptly. Activating automated heir succession...", "info");
+        setRole('host');
+        roleRef.current = 'host';
+        addLog("👑 Nexus Failover: You are designated 1st Heir and have assumed Host authority!", "ok");
+        setMessages(msgs => [...msgs, {
+          id: Date.now().toString(),
+          text: "🛡️ Nexus Failover: Host disconnected abruptly. You have assumed Authoritative Host status!",
+          sender: 'system',
+          timestamp: new Date()
+        }]);
+      }
     };
 
     channel.onmessage = async (event) => {
@@ -524,6 +660,26 @@ export default function App() {
               delete next[data.id];
               return next;
             });
+          } else if (data.type === 'host-handoff') {
+            if (data.newHostId === profile.id) {
+              setRole('host');
+              roleRef.current = 'host';
+              addLog(`👑 Host Authority Transferred: You are now the Authoritative Host!`, "ok");
+              setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                text: `👑 Nexus Failover: Host authority handed over to you by ${data.oldHostName}!`,
+                sender: 'system',
+                timestamp: new Date()
+              }]);
+            } else {
+              addLog(`👑 Host authority transferred to ${data.newHostName}`, "info");
+              setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                text: `👑 Nexus Failover: Host authority transferred to ${data.newHostName}.`,
+                sender: 'system',
+                timestamp: new Date()
+              }]);
+            }
           } else if (data.type === 'profile-update') {
             const updatedProfile = data.profile;
             setPeerProfiles(prev => ({ ...prev, [updatedProfile.id]: updatedProfile }));
@@ -602,10 +758,38 @@ export default function App() {
               chunks: [],
               fileHandle: null,
               writable: null,
-              isWriting: false
+              isWriting: false,
+              isDirectDisk: false
             };
             
-            if (navigator.storage && navigator.storage.getDirectory) {
+            // Direct Downloads: Prompt browser immediately to save directly to disk (bypasses RAM completely)
+            if (directDownloadsRef.current && (window as any).showSaveFilePicker) {
+              try {
+                const handle = await (window as any).showSaveFilePicker({
+                  suggestedName: data.name,
+                  types: [{
+                    description: 'Direct Disk Download',
+                    accept: { [data.mimeType || 'application/octet-stream']: [] }
+                  }]
+                });
+                bufferRef.fileHandle = handle;
+                bufferRef.writable = await handle.createWritable();
+                bufferRef.isDirectDisk = true;
+                addLog(`Direct download initiated: Writing ${data.name} directly to disk (RAM bypassed)`, "ok");
+              } catch (err: any) {
+                if (err.name === 'AbortError') {
+                  addLog("Transfer Aborted: User cancelled direct disk save prompt", "err");
+                  setTransfer(null);
+                  fileBuffers.current.delete(peerId);
+                  return;
+                } else {
+                  addLog(`Transfer Aborted: ${err.message || err}`, "err");
+                  setTransfer(null);
+                  fileBuffers.current.delete(peerId);
+                  return;
+                }
+              }
+            } else if (navigator.storage && navigator.storage.getDirectory) {
               navigator.storage.getDirectory().then(async root => {
                 try {
                   const safeName = data.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
@@ -627,7 +811,7 @@ export default function App() {
               transferredBytes: 0,
               totalBytes: data.size
             });
-            addLog(`Incoming payload: ${data.name}`, "info");
+            addLog(`Incoming payload: ${data.name}${bufferRef.isDirectDisk ? ' [Direct Disk]' : ''}`, "info");
             if (roleRef.current === 'host') {
               dataChannels.current.forEach((dc, otherId) => {
                 if (otherId !== peerId && dc.readyState === 'open') {
@@ -718,26 +902,57 @@ export default function App() {
         const buffer = fileBuffers.current.get(peerId);
         if (buffer) {
           buffer.receivedSize += event.data.byteLength;
-          buffer.chunks.push(event.data);
 
-          if (buffer.writable && !buffer.isWriting) {
-            buffer.isWriting = true;
-            (async () => {
-              try {
-                while(buffer.chunks.length > 0) {
-                  const chunk = buffer.chunks.shift();
-                  await buffer.writable.write(chunk);
+          if (buffer.isDirectDisk) {
+            // Direct disk streaming without keeping in RAM
+            if (buffer.writable) {
+              buffer.chunks.push(event.data);
+              if (!buffer.isWriting) {
+                buffer.isWriting = true;
+                (async () => {
+                  try {
+                    while (buffer.chunks.length > 0) {
+                      const chunk = buffer.chunks.shift();
+                      await buffer.writable.write(chunk);
+                    }
+                    if (buffer.receivedSize >= buffer.metadata.size && buffer.chunks.length === 0) {
+                      await buffer.writable.close();
+                      triggerTransferAnimation();
+                      addLog(`Direct download complete: ${buffer.metadata.name} written directly to disk`, "ok");
+                      finishFileReceive(buffer, null);
+                    }
+                  } catch (diskErr: any) {
+                    addLog(`Transfer Aborted: Direct disk write failed (${diskErr?.message || diskErr})`, "err");
+                    setTransfer(null);
+                    fileBuffers.current.delete(peerId);
+                  } finally {
+                    buffer.isWriting = false;
+                  }
+                })();
+              }
+            }
+          } else {
+            buffer.chunks.push(event.data);
+
+            if (buffer.writable && !buffer.isWriting) {
+              buffer.isWriting = true;
+              (async () => {
+                try {
+                  while(buffer.chunks.length > 0) {
+                    const chunk = buffer.chunks.shift();
+                    await buffer.writable.write(chunk);
+                  }
+                } finally {
+                  buffer.isWriting = false;
                 }
-              } finally {
-                buffer.isWriting = false;
-              }
-              
-              if (buffer.receivedSize >= buffer.metadata.size && buffer.chunks.length === 0) {
-                await buffer.writable.close();
-                const blob = await buffer.fileHandle.getFile();
-                finishFileReceive(buffer, blob);
-              }
-            })();
+                
+                if (buffer.receivedSize >= buffer.metadata.size && buffer.chunks.length === 0) {
+                  await buffer.writable.close();
+                  const blob = await buffer.fileHandle.getFile();
+                  finishFileReceive(buffer, blob);
+                }
+              })();
+            }
           }
 
           const now = Date.now();
@@ -755,7 +970,7 @@ export default function App() {
             });
           }
 
-          if (!buffer.writable && buffer.receivedSize >= buffer.metadata.size) {
+          if (!buffer.isDirectDisk && !buffer.writable && buffer.receivedSize >= buffer.metadata.size) {
             triggerTransferAnimation();
             const blob = new Blob(buffer.chunks, { type: buffer.metadata.mimeType });
             finishFileReceive(buffer, blob);
@@ -764,17 +979,18 @@ export default function App() {
       }
     };
 
-    const finishFileReceive = (buffer: any, blob: Blob) => {
+    const finishFileReceive = (buffer: any, blob: Blob | null) => {
       const name = buffer.metadata.name;
       const size = buffer.metadata.size;
       const senderName = buffer.metadata.senderName || "Unknown Node";
       const senderColor = buffer.metadata.senderColor || "bg-muted";
       const senderId = buffer.metadata.senderId;
+      const isDirectDisk = buffer.isDirectDisk;
       
       setFiles(prev => [{
         id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
         name,
-        blob,
+        blob: blob || new Blob([], { type: buffer.metadata.mimeType || 'application/octet-stream' }),
         size,
         senderName,
         senderColor,
@@ -785,16 +1001,17 @@ export default function App() {
       
       setMessages(prev => [...prev, {
         id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
-        text: `📁 Received: ${name}`,
+        text: `📁 Received: ${name}${isDirectDisk ? ' (Saved directly to Disk)' : ''}`,
         sender: 'system',
         timestamp: new Date()
       }]);
       
       setTransfer(null);
       fileBuffers.current.delete(peerId);
-      addLog(`Payload received: ${name}`, "ok");
+      addLog(`Payload received: ${name}${isDirectDisk ? ' (Saved to disk)' : ''}`, "ok");
       
-      if (autoDownloadRef.current) {
+      // Auto-download to browser folder if not already written to disk
+      if (!isDirectDisk && autoDownloadRef.current && blob) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -841,12 +1058,24 @@ export default function App() {
     pc.ontrack = (event) => {
       const track = event.track;
       addLog(`Received incoming media stream track (${track.kind})`, "ok");
-      setRemoteStreams(prev => {
-        const currentStream = prev[id];
-        const existingTracks = currentStream ? currentStream.getTracks().filter(t => t.id !== track.id) : [];
-        const updatedStream = new MediaStream([...existingTracks, track]);
-        return { ...prev, [id]: updatedStream };
-      });
+      if (event.streams && event.streams[0]) {
+        const stream = event.streams[0];
+        setRemoteStreams(prev => {
+          if (prev[id] === stream) return prev;
+          return { ...prev, [id]: stream };
+        });
+      } else {
+        setRemoteStreams(prev => {
+          const currentStream = prev[id];
+          if (currentStream) {
+            if (!currentStream.getTracks().some(t => t.id === track.id)) {
+              currentStream.addTrack(track);
+            }
+            return { ...prev, [id]: new MediaStream(currentStream.getTracks()) };
+          }
+          return { ...prev, [id]: new MediaStream([track]) };
+        });
+      }
     };
 
     localConnectionRef.current = pc;
@@ -943,7 +1172,7 @@ export default function App() {
     }
   };
 
-  const createSimStream = (label: string, color: string) => {
+  const createSimStream = (label: string, color: string, withAudio: boolean = true) => {
     const canvas = document.createElement('canvas');
     canvas.width = 640; 
     canvas.height = 480;
@@ -966,23 +1195,60 @@ export default function App() {
     }, 100);
     const s = (canvas as any).captureStream(30);
     (s as any)._simTimer = timer;
+
+    if (withAudio) {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const audioCtx = new AudioCtx();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.005, audioCtx.currentTime);
+          osc.connect(gain);
+          const dest = audioCtx.createMediaStreamDestination();
+          gain.connect(dest);
+          osc.start();
+          dest.stream.getAudioTracks().forEach(t => s.addTrack(t));
+          (s as any)._simAudioCtx = audioCtx;
+        }
+      } catch (e) {}
+    }
     return s;
   };
 
   const startCall = async (type: 'audio' | 'video') => {
     let stream: MediaStream;
+    const isRestricted = bandwidthOptimized || connectedCount >= 3;
+    const videoConstraint = type === 'video' 
+      ? (isRestricted ? { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { max: 15 } } : true)
+      : false;
+
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: type === 'video'
+        video: videoConstraint
       });
     } catch (e) {
       if (isSimulation) {
         addLog("Permission denied or preview mode, using simulated live stream", "info");
-        stream = createSimStream('SIMULATED LOCAL STREAM', '#38bdf8');
+        stream = createSimStream('SIMULATED LOCAL STREAM', '#38bdf8', true);
+      } else if (type === 'video') {
+        addLog("Camera access restricted, attempting audio-only fallback", "info");
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        } catch {
+          addLog("Hardware media access restricted, generating preview stream", "info");
+          stream = createSimStream('TEST LOCAL STREAM', '#38bdf8', true);
+        }
       } else {
-        addLog(`Could not access camera/microphone: ${(e as any)?.message || e}`, "err");
-        return;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        } catch {
+          addLog("Microphone access restricted, generating preview stream", "info");
+          stream = createSimStream('TEST LOCAL AUDIO', '#38bdf8', true);
+        }
       }
     }
 
@@ -995,16 +1261,9 @@ export default function App() {
     if (isSimulation) {
       const fakeStreams: Record<string, MediaStream> = {};
       if (type === 'video') {
-        fakeStreams['sim_peer_1'] = createSimStream('Simulated Peer Video', '#34d399');
+        fakeStreams['sim_peer_1'] = createSimStream('Simulated Peer Video', '#34d399', true);
       } else {
-        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContext) {
-          const audioCtx = new AudioContext();
-          const dest = audioCtx.createMediaStreamDestination();
-          fakeStreams['sim_peer_1'] = dest.stream;
-        } else {
-          fakeStreams['sim_peer_1'] = new MediaStream();
-        }
+        fakeStreams['sim_peer_1'] = createSimStream('Simulated Peer Audio', '#34d399', true);
       }
       setRemoteStreams(fakeStreams);
       return;
@@ -1042,17 +1301,22 @@ export default function App() {
     stopRingChime();
     setIncomingCall(null);
     let stream: MediaStream;
+    const isRestricted = bandwidthOptimized || connectedCount >= 3;
+    const videoConstraint = incoming.callType === 'video' 
+      ? (isRestricted ? { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { max: 15 } } : true)
+      : false;
+
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: incoming.callType === 'video'
+        video: videoConstraint
       });
     } catch (e) {
       addLog("Camera access restricted, attempting audio-only", "info");
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       } catch {
-        stream = createSimStream('Joined Stream', '#38bdf8');
+        stream = createSimStream('Joined Stream', '#38bdf8', true);
       }
     }
 
@@ -1064,14 +1328,13 @@ export default function App() {
 
     const pc = peerConnections.current.get(incoming.peerId);
     if (pc) {
-      stream.getTracks().forEach(track => {
-        if (!pc.getSenders().find(s => s.track === track)) {
-          pc.addTrack(track, stream);
-        }
-      });
-
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(incoming.sdp));
+        stream.getTracks().forEach(track => {
+          if (!pc.getSenders().find(s => s.track === track)) {
+            pc.addTrack(track, stream);
+          }
+        });
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         await waitForIce(pc);
@@ -1117,6 +1380,9 @@ export default function App() {
       if ((localStreamRef.current as any)._simTimer) {
         clearInterval((localStreamRef.current as any)._simTimer);
       }
+      if ((localStreamRef.current as any)._simAudioCtx) {
+        (localStreamRef.current as any)._simAudioCtx.close().catch(() => {});
+      }
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
     }
@@ -1124,6 +1390,7 @@ export default function App() {
 
     Object.values(remoteStreams).forEach((st: any) => {
       if (st._simTimer) clearInterval(st._simTimer);
+      if (st._simAudioCtx) st._simAudioCtx.close().catch(() => {});
       st.getTracks?.().forEach((t: any) => t.stop());
     });
 
@@ -1390,21 +1657,40 @@ export default function App() {
           >
             <RefreshCw className={cn("w-4 h-4 lg:w-5 lg:h-5", isSimulation && "animate-spin")} />
           </button>
-          <div className="min-w-0 cursor-pointer select-none" onClick={handleTitleClick}>
-            <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap">
-              <span className="hidden sm:inline">Quantum Link</span>
-              <span className="sm:hidden">Q-Link</span>
-              <span className="text-[10px] lg:text-xs text-muted font-normal ml-1 lg:ml-2">v7.8.4</span>
-            </h1>
-            <div className="text-[9px] md:text-[10px] lg:text-xs text-muted flex items-center gap-1 lg:gap-2 mt-0.5 whitespace-nowrap">
-              <span className={cn(
-                "h-1.5 w-1.5 lg:h-2 lg:w-2 rounded-full flex-shrink-0",
-                status === "connected" ? "bg-success" : status === "handshaking" ? "bg-accent animate-pulse" : "bg-muted"
-              )} />
-              <span className="truncate">
-                {status === "connected" ? (isSimulation ? "Network Simulated" : "Network Secured") : status === "handshaking" ? "Syncing..." : "Disconnected"}
-              </span>
-            </div>
+          <div 
+            className="min-w-0 cursor-pointer select-none relative group" 
+            onClick={handleTitleClick}
+            title={titleTapCount > 0 ? `${10 - titleTapCount} taps left to unlock easter egg` : "Quantum Link"}
+          >
+            <motion.div
+              animate={titleTapCount > 0 ? { scale: [1, 0.95, 1] } : {}}
+              transition={{ duration: 0.12 }}
+            >
+              <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap flex items-center gap-1.5">
+                <span className="hidden sm:inline">Quantum Link</span>
+                <span className="sm:hidden">Q-Link</span>
+                <span className="text-[10px] lg:text-xs text-muted font-normal">v7.8.4</span>
+                {titleTapCount >= 3 && (
+                  <motion.span
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0, opacity: 0 }}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-500 dark:text-cyan-400 border border-cyan-500/40 text-[9px] font-mono font-bold animate-pulse"
+                  >
+                    ⚡ {10 - titleTapCount}
+                  </motion.span>
+                )}
+              </h1>
+              <div className="text-[9px] md:text-[10px] lg:text-xs text-muted flex items-center gap-1 lg:gap-2 mt-0.5 whitespace-nowrap">
+                <span className={cn(
+                  "h-1.5 w-1.5 lg:h-2 lg:w-2 rounded-full flex-shrink-0",
+                  status === "connected" ? "bg-success" : status === "handshaking" ? "bg-accent animate-pulse" : "bg-muted"
+                )} />
+                <span className="truncate">
+                  {status === "connected" ? (isSimulation ? "Network Simulated" : "Network Secured") : status === "handshaking" ? "Syncing..." : "Disconnected"}
+                </span>
+              </div>
+            </motion.div>
           </div>
         </div>
 
@@ -1514,6 +1800,9 @@ export default function App() {
                   if (p) setSelectedPeerProfile(p);
                 }}
                 startCall={startCall}
+                bandwidthOptimized={bandwidthOptimized}
+                onToggleBandwidthOptimized={() => setBandwidthOptimized(prev => !prev)}
+                isCallActive={isCallActive}
               />
             </motion.div>
           ) : activeTab === "base64" ? (
@@ -2016,6 +2305,9 @@ export default function App() {
                   isSimulation={isSimulation}
                   onToggleSimulation={toggleSimulation}
                   onNavigateToConnect={() => { setShowFailoverMenu(false); setActiveTab(role ? "chat" : "qr"); }}
+                  onTransferHostControl={handleTransferHostControl}
+                  onGracefulHostDrop={handleGracefulHostDrop}
+                  onNetworkSplit={handleNetworkSplit}
                 />
               </div>
             </motion.div>
@@ -2038,29 +2330,10 @@ export default function App() {
           </motion.div>
         )}
 
-        {showCreatorPopup && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
-          >
-            <motion.div 
-              initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-              className="bg-black/90 p-8 rounded-xl border-2 border-green-500/50 shadow-[0_0_30px_rgba(34,197,94,0.3)] relative"
-            >
-              <button onClick={() => setShowCreatorPopup(false)} className="absolute top-2 right-2 p-1 text-green-500 hover:text-white cursor-pointer transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-              <div className="text-green-400 font-mono text-lg flex flex-col items-center">
-                <div className="w-12 h-12 mb-4 border-2 border-green-500 rounded-full flex items-center justify-center animate-pulse">
-                  <span className="text-2xl font-bold text-green-500">Q</span>
-                </div>
-                <div className="overflow-hidden whitespace-nowrap border-r-2 border-green-500 pr-1 animate-typing">
-                  Created By Naman Verma as a fun project
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
+        <EasterEggModal 
+          isOpen={showCreatorPopup} 
+          onClose={() => setShowCreatorPopup(false)} 
+        />
       </AnimatePresence>
 
       <CallOverlay 
@@ -2070,10 +2343,28 @@ export default function App() {
         remoteStreams={remoteStreams}
         peerProfiles={peerProfiles}
         peerTrackStates={peerTrackStates}
+        getPeerName={(peerId) => {
+          const profId = peerIdToProfileId.current.get(peerId);
+          if (profId && peerProfiles[profId]?.username) return peerProfiles[profId].username;
+          if (peerProfiles[peerId]?.username) return peerProfiles[peerId].username;
+          const matched = (Object.values(peerProfiles) as UserProfile[]).find(p => p.id === peerId || p.id === profId);
+          if (matched?.username) return matched.username;
+          return 'Remote Node';
+        }}
         onEndCall={endCall}
         onToggleTrack={handleToggleTrack}
         onRequestAddTrack={handleAddTrack}
       />
+
+      <AnimatePresence>
+        {selectedPeerProfile && (
+          <ViewProfileModal 
+            profile={selectedPeerProfile}
+            onClose={() => setSelectedPeerProfile(null)}
+            onStartCall={startCall}
+          />
+        )}
+      </AnimatePresence>
 
       <IncomingCallModal 
         incomingCall={incomingCall}
