@@ -205,6 +205,7 @@ export function NexusFailoverHUD({
   };
 
   // Sync cluster peers with simulation state or live connection changes
+  const prevSimRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (isSimActive) {
       const simPeers = createSimulatedPeers();
@@ -213,7 +214,10 @@ export function NexusFailoverHUD({
       setLocalRole('peer');
       setTerm(1);
       setActiveAcks(simPeers.length);
-      addHUDLog("Loaded sandboxed 4-node simulation cluster. Failover testing enabled.", "info");
+      if (prevSimRef.current !== true) {
+        addHUDLog("Loaded sandboxed 4-node simulation cluster. Failover testing enabled.", "info");
+        prevSimRef.current = true;
+      }
     } else {
       const live = createLivePeers();
       setPeers(live);
@@ -223,10 +227,13 @@ export function NexusFailoverHUD({
       setLocalRole(isHost ? 'host' : 'peer');
       setTerm(1);
       setActiveAcks(live.length);
-      if (live.length === 1) {
-        addHUDLog(`Standalone mode: [${localUsername || 'Local User'}] is active. Zero remote peers connected.`, "info");
-      } else {
-        addHUDLog(`Synchronized live mesh with ${live.length} real peers.`, "ok");
+      if (prevSimRef.current !== false) {
+        if (live.length === 1) {
+          addHUDLog(`Standalone mode: [${localUsername || 'Local User'}] is active. Zero remote peers connected.`, "info");
+        } else {
+          addHUDLog(`Synchronized live mesh with ${live.length} real peers.`, "ok");
+        }
+        prevSimRef.current = false;
       }
     }
   }, [isSimActive, realConnectedCount, JSON.stringify(peerProfiles), role]);
@@ -442,7 +449,7 @@ export function NexusFailoverHUD({
   const currentHostPeer = peers.find(p => p.peerId === currentHostId) || peers.find(p => p.role === 'host') || peers[0];
 
   return (
-    <div className="w-full h-full flex flex-col gap-3 sm:gap-4 lg:gap-5 overflow-y-auto pr-0 sm:pr-1 pb-24 lg:pb-6 scrollbar-hide text-text">
+    <div className="w-full h-full flex flex-col gap-3 sm:gap-4 lg:gap-5 overflow-y-auto p-3 sm:p-5 lg:p-6 pb-24 lg:pb-8 scrollbar-hide text-text">
       
       {/* Simulation Mode Toggle Banner */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 px-3.5 sm:px-4 py-2.5 rounded-2xl border glass-panel flex-shrink-0">
@@ -579,7 +586,7 @@ export function NexusFailoverHUD({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4 lg:gap-5 flex-1 min-h-0">
         
         {/* Left Column: Synchronized Peer Table */}
-        <div className="lg:col-span-8 flex flex-col glass-panel rounded-2xl sm:rounded-3xl p-3 sm:p-5 border border-white/40 dark:border-white/10 shadow-sm min-h-fit">
+        <div className="lg:col-span-8 flex flex-col glass-panel rounded-2xl sm:rounded-3xl p-3 sm:p-5 border border-white/40 dark:border-white/10 shadow-sm">
           
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 sm:pb-4 border-b border-white/20 dark:border-white/10">
             <div>
@@ -735,7 +742,7 @@ export function NexusFailoverHUD({
           </div>
 
           {/* Desktop/Tablet Peer Table (Hidden on small portrait mobile screens, shown on tablet/desktop) */}
-          <div className="hidden sm:block flex-1 overflow-x-auto mt-2 sm:mt-3 scrollbar-hide">
+          <div className="hidden sm:block w-full overflow-x-auto mt-2 sm:mt-3 scrollbar-hide">
             <table className="w-full text-left border-collapse text-xs whitespace-nowrap sm:whitespace-normal">
               <thead>
                 <tr className="border-b border-white/10 text-muted font-mono uppercase text-[9px] sm:text-[10px] tracking-wider">
@@ -917,7 +924,7 @@ export function NexusFailoverHUD({
           )}
 
           {/* Failover Telemetry Log Feed */}
-          <div className="mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-white/20 dark:border-white/10 flex flex-col min-h-[110px] max-h-[160px] sm:max-h-[200px]">
+          <div className="mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-white/20 dark:border-white/10 flex flex-col">
             <div className="text-[10px] sm:text-[11px] font-mono text-muted uppercase tracking-wider mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 text-accent animate-pulse" />
@@ -933,7 +940,7 @@ export function NexusFailoverHUD({
 
             <div 
               ref={logContainerRef}
-              className="flex-1 overflow-y-auto pr-1 space-y-1.5 font-mono text-[10px] sm:text-[11px] bg-black/5 dark:bg-black/20 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-white/10 scrollbar-hide"
+              className="h-28 sm:h-32 overflow-y-auto pr-1 space-y-1.5 font-mono text-[10px] sm:text-[11px] bg-black/5 dark:bg-black/20 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-white/10 scrollbar-hide"
             >
               {logs.map(l => (
                 <div key={l.id} className="flex items-start gap-2">

@@ -2519,7 +2519,7 @@ export default function App() {
                   <X className="w-5 h-5 text-muted" />
                 </button>
               </div>
-              <div className="flex-1 overflow-hidden relative p-2 md:p-0">
+              <div className="flex-1 overflow-hidden relative">
                 <NexusFailoverHUD 
                   localUsername={profile.username}
                   localAvatarColor={profile.avatarColor}
