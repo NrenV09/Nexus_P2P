@@ -1873,22 +1873,6 @@ export default function App() {
               )}
             </button>
             <button 
-              onClick={() => setActiveTab("registry")}
-              className={cn(
-                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap flex items-center gap-1.5",
-                activeTab === "registry" ? "bg-white dark:bg-transparent text-text shadow-sm" : "text-muted hover:text-text cursor-pointer"
-              )}
-              title="Synchronized Nexus Peer Registry & Failover Control"
-            >
-              <Users className="w-3.5 h-3.5 text-accent" />
-              <span>Peer Registry</span>
-              {connectedCount > 0 && (
-                <span className="w-4 h-4 rounded-full bg-accent/20 text-accent text-[9px] font-bold flex items-center justify-center">
-                  {connectedCount + 1}
-                </span>
-              )}
-            </button>
-            <button 
               onClick={() => setActiveTab("base64")}
               className={cn(
                 "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-semibold transition-all rounded-xl whitespace-nowrap",
@@ -1901,21 +1885,6 @@ export default function App() {
         </div>
 
         <div className="flex gap-2 md:gap-3 lg:gap-6 items-center flex-shrink-0 ml-auto md:ml-0">
-          {/* Quick Access to Synchronized Nexus Peer Registry */}
-          <button
-            onClick={() => setActiveTab("registry")}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all cursor-pointer shadow-sm",
-              activeTab === "registry" 
-                ? "bg-accent text-white border-accent shadow-md" 
-                : "bg-white/40 dark:bg-transparent border-white/40 dark:border-white/10 hover:bg-white/60 dark:hover:bg-white/10 text-text"
-            )}
-            title="View Synchronized Nexus Peer Registry"
-          >
-            <ShieldCheck className={cn("w-3.5 h-3.5", activeTab === "registry" ? "text-white" : "text-accent")} />
-            <span className="hidden sm:inline font-mono text-[11px]">Peer Registry</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-          </button>
           {/* Active Call Background Indicator (PiP mode indicator) */}
           {isCallActive && isCallMinimized && (
             <button
@@ -2039,7 +2008,7 @@ export default function App() {
               <section className="col-span-1 lg:col-span-4 flex flex-col gap-4 flex-shrink-0 lg:overflow-y-auto scrollbar-hide">
                 {/* Synchronized Nexus Peer Registry Status Card (Instant visibility in portrait mode) */}
                 <div 
-                  onClick={() => setActiveTab("registry")}
+                  onClick={() => setShowFailoverMenu(true)}
                   className="glass-panel p-3.5 rounded-2xl flex items-center justify-between border border-accent/20 bg-accent/5 hover:bg-accent/10 transition-all cursor-pointer group shadow-sm flex-shrink-0"
                   title="Click to view full Synchronized Nexus Peer Registry"
                 >
@@ -2069,7 +2038,7 @@ export default function App() {
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
                     <button
-                      onClick={() => setActiveTab("registry")}
+                      onClick={() => setShowFailoverMenu(true)}
                       className="text-[11px] font-mono text-accent hover:underline flex items-center gap-1 cursor-pointer"
                       title="Open Synchronized Nexus Peer Registry"
                     >
@@ -2479,7 +2448,7 @@ export default function App() {
                 </div>
 
                 <button
-                  onClick={() => setActiveTab("registry")}
+                  onClick={() => setShowFailoverMenu(true)}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 hover:bg-white/60 dark:hover:bg-white/10 text-text text-xs font-semibold transition cursor-pointer shadow-sm mt-2"
                   title="View Synchronized Nexus Peer Registry"
                 >
