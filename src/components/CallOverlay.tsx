@@ -156,15 +156,23 @@ export function CallOverlay({
     setIsVideoOff(type === 'audio');
   }, [type]);
 
-  // Clean up screen sharing on unmount
+  // Clean up screen sharing on unmount or when call becomes inactive
   useEffect(() => {
+    if (!active) {
+      if (screenTrackRef.current) {
+        screenTrackRef.current.stop();
+        screenTrackRef.current = null;
+      }
+      setScreenTrack(null);
+      setIsScreenSharing(false);
+    }
     return () => {
       if (screenTrackRef.current) {
         screenTrackRef.current.stop();
         screenTrackRef.current = null;
       }
     };
-  }, []);
+  }, [active]);
 
   const toggleMic = () => {
     if (!localStream) return;

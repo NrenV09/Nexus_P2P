@@ -165,6 +165,21 @@ export default function App() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isCallActive, setIsCallActive] = useState(false);
   const [isCallMinimized, setIsCallMinimized] = useState(false);
+  const isCallActiveRef = useRef(false);
+  useEffect(() => {
+    isCallActiveRef.current = isCallActive;
+  }, [isCallActive]);
+
+  const remoteStreamsRef = useRef<Record<string, MediaStream>>({});
+  useEffect(() => {
+    remoteStreamsRef.current = remoteStreams;
+  }, [remoteStreams]);
+
+  const isSimulationRef = useRef(false);
+  useEffect(() => {
+    isSimulationRef.current = isSimulation;
+  }, [isSimulation]);
+
   const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleTitleClick = useCallback(() => {
@@ -360,6 +375,10 @@ export default function App() {
   }, []);
 
   const resetAll = useCallback(() => {
+    // Automatically turn off active call and clean up all media streams
+    if (endCallRef.current) {
+      endCallRef.current();
+    }
     localConnectionRef.current?.close();
     localConnectionRef.current = null;
     peerConnections.current.forEach(pc => pc.close());
@@ -385,7 +404,10 @@ export default function App() {
       return;
     }
     if (isSimulation) {
+      // Automatically turn off active call and tear down simulation
+      endCallRef.current?.();
       resetAll();
+      addLog("Simulation ended: Call automatically turned off", "info");
     } else {
       setShowSimWarning(false);
       resetAll();
@@ -467,6 +489,36 @@ export default function App() {
 
     const pc = peerConnections.current.get(peerIdToClose);
     if (pc) pc.close();
+
+    // Clean up remote stream and track state for this peer
+    setRemoteStreams(prev => {
+      const stream = prev[peerIdToClose];
+      if (stream) {
+        if ((stream as any)._simTimer) clearInterval((stream as any)._simTimer);
+        if ((stream as any)._simAudioCtx) {
+          try { (stream as any)._simAudioCtx.close().catch(() => {}); } catch (_) {}
+        }
+        stream.getTracks?.().forEach(t => t.stop());
+        const next = { ...prev };
+        delete next[peerIdToClose];
+        return next;
+      }
+      return prev;
+    });
+    delete remoteStreamsRef.current[peerIdToClose];
+    setPeerTrackStates(prev => {
+      const next = { ...prev };
+      delete next[peerIdToClose];
+      return next;
+    });
+
+    setIncomingCall(curr => {
+      if (curr && (curr.peerId === peerIdToClose || curr.callerId === profileId)) {
+        stopRingChime();
+        return null;
+      }
+      return curr;
+    });
     
     setPeerProfiles(prev => {
       const p = prev[profileId];
@@ -499,8 +551,14 @@ export default function App() {
     peerIdToProfileId.current.delete(peerIdToClose);
     
     setConnectedPeers(dataChannels.current.size);
-    if (dataChannels.current.size === 0) setStatus("offline");
-  }, [addLog]);
+    if (dataChannels.current.size === 0) {
+      setStatus("offline");
+      if (isCallActiveRef.current || localStreamRef.current) {
+        endCallRef.current?.();
+        addLog("Call automatically ended: Disconnected from peer", "info");
+      }
+    }
+  }, [addLog, stopRingChime]);
 
   const setupDataChannel = useCallback((channel: RTCDataChannel, peerId: string) => {
     channel.binaryType = 'arraybuffer';
@@ -519,9 +577,47 @@ export default function App() {
       dataChannels.current.delete(peerId);
       const profId = peerIdToProfileId.current.get(peerId);
       peerIdToProfileId.current.delete(peerId);
+
+      // Clean up remote stream and track state for this leaving peer
+      setRemoteStreams(prev => {
+        const stream = prev[peerId];
+        if (stream) {
+          if ((stream as any)._simTimer) clearInterval((stream as any)._simTimer);
+          if ((stream as any)._simAudioCtx) {
+            try { (stream as any)._simAudioCtx.close().catch(() => {}); } catch (_) {}
+          }
+          stream.getTracks?.().forEach(t => t.stop());
+          const next = { ...prev };
+          delete next[peerId];
+          return next;
+        }
+        return prev;
+      });
+      delete remoteStreamsRef.current[peerId];
+      setPeerTrackStates(prev => {
+        const next = { ...prev };
+        delete next[peerId];
+        return next;
+      });
+
+      // Clear ringing incoming call if it was from this peer
+      setIncomingCall(curr => {
+        if (curr && curr.peerId === peerId) {
+          stopRingChime();
+          return null;
+        }
+        return curr;
+      });
       
       setConnectedPeers(dataChannels.current.size);
-      if (dataChannels.current.size === 0) setStatus("offline");
+      if (dataChannels.current.size === 0) {
+        setStatus("offline");
+        // Automatically turn off call when all live peers disconnect
+        if (isCallActiveRef.current || localStreamRef.current) {
+          endCallRef.current?.();
+          addLog("Call automatically ended: All peers disconnected", "info");
+        }
+      }
       
       setPeerProfiles(prev => {
         const idToRemove = profId || peerId;
@@ -852,25 +948,7 @@ export default function App() {
             }));
           } else if (data.type === 'call-end') {
             addLog("Call ended by peer", "info");
-            stopRingChime();
-            setIncomingCall(null);
-            if (localStreamRef.current) {
-              if ((localStreamRef.current as any)._simTimer) {
-                clearInterval((localStreamRef.current as any)._simTimer);
-              }
-              localStreamRef.current.getTracks().forEach(t => t.stop());
-              localStreamRef.current = null;
-            }
-            Object.values(remoteStreams).forEach((st: any) => {
-              if (st._simTimer) clearInterval(st._simTimer);
-              st.getTracks?.().forEach((t: any) => t.stop());
-            });
-            setLocalStream(null);
-            setIsCallActive(false);
-            setIsCallMinimized(false);
-            setCallType(null);
-            setRemoteStreams({});
-            setPeerTrackStates({});
+            endCallRef.current?.();
           } else if (data.type === 'ice-candidate') {
             const pc = peerConnections.current.get(peerId);
             if (pc && data.candidate) {
@@ -1038,8 +1116,12 @@ export default function App() {
     peerConnections.current.set(id, pc);
     
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
         pc.close();
+        if (dataChannels.current.size === 0 && (isCallActiveRef.current || localStreamRef.current)) {
+          endCallRef.current?.();
+          addLog("Call automatically ended: Peer connection lost", "info");
+        }
       }
     };
 
@@ -1385,18 +1467,26 @@ export default function App() {
         clearInterval((localStreamRef.current as any)._simTimer);
       }
       if ((localStreamRef.current as any)._simAudioCtx) {
-        (localStreamRef.current as any)._simAudioCtx.close().catch(() => {});
+        try {
+          (localStreamRef.current as any)._simAudioCtx.close().catch(() => {});
+        } catch (_) {}
       }
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
     }
     setLocalStream(null);
 
-    Object.values(remoteStreams).forEach((st: any) => {
+    const streamsToStop = { ...remoteStreams, ...remoteStreamsRef.current };
+    Object.values(streamsToStop).forEach((st: any) => {
       if (st._simTimer) clearInterval(st._simTimer);
-      if (st._simAudioCtx) st._simAudioCtx.close().catch(() => {});
+      if (st._simAudioCtx) {
+        try {
+          st._simAudioCtx.close().catch(() => {});
+        } catch (_) {}
+      }
       st.getTracks?.().forEach((t: any) => t.stop());
     });
+    remoteStreamsRef.current = {};
 
     peerConnections.current.forEach(pc => {
       pc.getSenders().forEach(sender => {
@@ -1408,17 +1498,54 @@ export default function App() {
       });
     });
 
+    const hadActiveCall = isCallActiveRef.current || isCallActive;
     setIsCallActive(false);
     setIsCallMinimized(false);
     setCallType(null);
     setRemoteStreams({});
     setPeerTrackStates({});
-    addLog("Ended call", "info");
-  }, [addLog, stopRingChime, remoteStreams]);
+    if (hadActiveCall) {
+      addLog("Call ended", "info");
+    }
+  }, [addLog, stopRingChime, remoteStreams, isCallActive]);
 
   useEffect(() => {
     endCallRef.current = endCall;
   }, [endCall]);
+
+  // Monitor simulation mode and live connection lifecycle to ensure active calls automatically terminate
+  const prevIsSimRef = useRef(isSimulation);
+  const prevStatusRef = useRef(status);
+  const prevConnectedPeersRef = useRef(connectedCount);
+  const prevRoleRef = useRef(role);
+
+  useEffect(() => {
+    // 1. When ending simulation mode: call automatically turns off
+    if (prevIsSimRef.current && !isSimulation) {
+      if (isCallActive || localStreamRef.current || incomingCall || Object.keys(remoteStreams).length > 0) {
+        endCallRef.current?.();
+        addLog("Simulation ended: Call automatically turned off", "info");
+      }
+    }
+
+    // 2. Similar for live connections: when live connection drops, all peers disconnect, or session closes
+    if (!isSimulation) {
+      const liveConnectionDropped =
+        (prevStatusRef.current === "connected" && status === "offline") ||
+        (prevConnectedPeersRef.current > 0 && connectedCount === 0) ||
+        (prevRoleRef.current !== null && role === null);
+
+      if (liveConnectionDropped && (isCallActive || localStreamRef.current || incomingCall || Object.keys(remoteStreams).length > 0)) {
+        endCallRef.current?.();
+        addLog("Live connection ended: Call automatically turned off", "info");
+      }
+    }
+
+    prevIsSimRef.current = isSimulation;
+    prevStatusRef.current = status;
+    prevConnectedPeersRef.current = connectedCount;
+    prevRoleRef.current = role;
+  }, [isSimulation, status, connectedCount, role, isCallActive, incomingCall, remoteStreams, addLog]);
 
   const handleToggleTrack = (kind: 'audio' | 'video', enabled: boolean) => {
     dataChannels.current.forEach(dc => {
@@ -1746,6 +1873,22 @@ export default function App() {
               )}
             </button>
             <button 
+              onClick={() => setActiveTab("registry")}
+              className={cn(
+                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap flex items-center gap-1.5",
+                activeTab === "registry" ? "bg-white dark:bg-transparent text-text shadow-sm" : "text-muted hover:text-text cursor-pointer"
+              )}
+              title="Synchronized Nexus Peer Registry & Failover Control"
+            >
+              <Users className="w-3.5 h-3.5 text-accent" />
+              <span>Peer Registry</span>
+              {connectedCount > 0 && (
+                <span className="w-4 h-4 rounded-full bg-accent/20 text-accent text-[9px] font-bold flex items-center justify-center">
+                  {connectedCount + 1}
+                </span>
+              )}
+            </button>
+            <button 
               onClick={() => setActiveTab("base64")}
               className={cn(
                 "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-semibold transition-all rounded-xl whitespace-nowrap",
@@ -1758,6 +1901,21 @@ export default function App() {
         </div>
 
         <div className="flex gap-2 md:gap-3 lg:gap-6 items-center flex-shrink-0 ml-auto md:ml-0">
+          {/* Quick Access to Synchronized Nexus Peer Registry */}
+          <button
+            onClick={() => setActiveTab("registry")}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all cursor-pointer shadow-sm",
+              activeTab === "registry" 
+                ? "bg-accent text-white border-accent shadow-md" 
+                : "bg-white/40 dark:bg-transparent border-white/40 dark:border-white/10 hover:bg-white/60 dark:hover:bg-white/10 text-text"
+            )}
+            title="View Synchronized Nexus Peer Registry"
+          >
+            <ShieldCheck className={cn("w-3.5 h-3.5", activeTab === "registry" ? "text-white" : "text-accent")} />
+            <span className="hidden sm:inline font-mono text-[11px]">Peer Registry</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+          </button>
           {/* Active Call Background Indicator (PiP mode indicator) */}
           {isCallActive && isCallMinimized && (
             <button
@@ -1843,6 +2001,31 @@ export default function App() {
             >
               <Base64ToolNode />
             </motion.div>
+          ) : activeTab === "registry" ? (
+            <motion.div 
+              key="nexus-registry" 
+              initial={{ opacity: 0, y: 15, filter: "blur(4px)" }} 
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} 
+              exit={{ opacity: 0, y: -15, filter: "blur(4px)" }} 
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              className="h-full w-full overflow-hidden"
+            >
+              <NexusFailoverHUD 
+                localUsername={profile.username}
+                localAvatarColor={profile.avatarColor}
+                localPeerId={profile.id}
+                realConnectedCount={connectedCount}
+                peerProfiles={peerProfiles}
+                role={role}
+                networkStatus={status}
+                isSimulation={isSimulation}
+                onToggleSimulation={toggleSimulation}
+                onNavigateToConnect={() => setActiveTab(role ? "chat" : "qr")}
+                onTransferHostControl={handleTransferHostControl}
+                onGracefulHostDrop={handleGracefulHostDrop}
+                onNetworkSplit={handleNetworkSplit}
+              />
+            </motion.div>
           ) : role ? (
             <motion.div 
               key="p2p-active"
@@ -1852,10 +2035,48 @@ export default function App() {
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               className="grid grid-cols-1 lg:grid-cols-12 lg:grid-rows-[1fr_auto] gap-6 h-full lg:overflow-hidden overflow-y-auto pb-20 lg:pb-0"
             >
-              {/* Top/First Section: Connection Matrix */}
+              {/* Top/First Section: Connection Matrix & Peer Registry Banner */}
               <section className="col-span-1 lg:col-span-4 flex flex-col gap-4 flex-shrink-0 lg:overflow-y-auto scrollbar-hide">
+                {/* Synchronized Nexus Peer Registry Status Card (Instant visibility in portrait mode) */}
+                <div 
+                  onClick={() => setActiveTab("registry")}
+                  className="glass-panel p-3.5 rounded-2xl flex items-center justify-between border border-accent/20 bg-accent/5 hover:bg-accent/10 transition-all cursor-pointer group shadow-sm flex-shrink-0"
+                  title="Click to view full Synchronized Nexus Peer Registry"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-accent/15 flex items-center justify-center text-accent flex-shrink-0">
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-text flex items-center gap-1.5 truncate">
+                        <span>Synchronized Peer Registry</span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-accent/20 text-accent font-mono font-bold">
+                          {connectedCount > 0 ? `${connectedCount + 1} Nodes` : "Standalone"}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-muted font-mono truncate">
+                        {connectedCount > 0 ? "Authoritative WebRTC cluster active" : "Deterministic failover & quorum engine"}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 text-accent text-xs font-semibold flex-shrink-0 ml-2">
+                    <span className="hidden sm:inline text-[11px]">View</span>
+                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                  </div>
+                </div>
+
                 <div className="glass-panel p-5 flex-shrink-0">
-                  <h3 className="text-sm font-semibold text-text mb-4">Connection Matrix</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
+                    <button
+                      onClick={() => setActiveTab("registry")}
+                      className="text-[11px] font-mono text-accent hover:underline flex items-center gap-1 cursor-pointer"
+                      title="Open Synchronized Nexus Peer Registry"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Peer Registry</span>
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button 
                       onClick={() => { setRole("host"); resetAll(); }}
@@ -2174,15 +2395,14 @@ export default function App() {
                   <div className="w-full lg:w-72 flex-shrink-0 glass-panel flex flex-col min-h-[350px] lg:min-h-0">
                     <div className="p-4 border-b border-white/30 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/20 dark:bg-transparent backdrop-blur-md sticky top-0 z-10 flex-shrink-0 rounded-t-3xl flex justify-between items-center">
                       <span className="text-sm font-semibold text-text">Activity Log</span>
-                      {role === 'host' && (
-                        <button
-                          onClick={() => setShowFailoverMenu(true)}
-                          className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors bg-accent/10 border border-accent/20 shadow-sm"
-                          title="Nexus Failover Settings"
-                        >
-                          <ShieldCheck className="w-4 h-4 text-accent" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => setShowFailoverMenu(true)}
+                        className="px-2 py-1 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 transition-colors bg-accent/10 border border-accent/20 shadow-sm flex items-center gap-1.5 cursor-pointer text-xs font-medium text-accent"
+                        title="Open Synchronized Nexus Peer Registry & Failover Control"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-accent" />
+                        <span className="text-[10px] font-mono font-semibold">Peer Registry</span>
+                      </button>
                     </div>
                     <div className="flex-1 p-4 text-[13px] overflow-y-auto scrollbar-hide flex flex-col gap-2 relative">
                       {[...logs, ...messages.filter(m => m.sender !== 'system').map(m => ({ 
@@ -2257,6 +2477,16 @@ export default function App() {
                     color="success"
                   />
                 </div>
+
+                <button
+                  onClick={() => setActiveTab("registry")}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 hover:bg-white/60 dark:hover:bg-white/10 text-text text-xs font-semibold transition cursor-pointer shadow-sm mt-2"
+                  title="View Synchronized Nexus Peer Registry"
+                >
+                  <Users className="w-4 h-4 text-accent" />
+                  <span>Explore Synchronized Nexus Peer Registry & Failover Simulation</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-muted" />
+                </button>
               </div>
             </motion.section>
           )}
@@ -2301,7 +2531,7 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showFailoverMenu && role === 'host' && (
+        {showFailoverMenu && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

@@ -579,14 +579,19 @@ export function NexusFailoverHUD({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4 lg:gap-5 flex-1 min-h-0">
         
         {/* Left Column: Synchronized Peer Table */}
-        <div className="lg:col-span-8 flex flex-col glass-panel rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 border border-white/40 dark:border-white/10 shadow-sm overflow-hidden">
+        <div className="lg:col-span-8 flex flex-col glass-panel rounded-2xl sm:rounded-3xl p-3 sm:p-5 border border-white/40 dark:border-white/10 shadow-sm min-h-fit">
           
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 sm:pb-4 border-b border-white/20 dark:border-white/10">
             <div>
-              <h3 className="text-sm sm:text-base font-bold tracking-tight text-text flex items-center gap-2">
-                <Users className="w-4 h-4 sm:w-5 sm:h-5 text-accent flex-shrink-0" />
-                <span>Synchronized Nexus Peer Registry</span>
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold tracking-tight text-text flex items-center gap-2">
+                  <Users className="w-4 h-4 sm:w-5 sm:h-5 text-accent flex-shrink-0" />
+                  <span>Synchronized Nexus Peer Registry</span>
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-accent/15 text-accent border border-accent/20 flex-shrink-0">
+                  {peers.length} {peers.length === 1 ? 'Node' : 'Nodes'}
+                </span>
+              </div>
               <p className="text-[11px] sm:text-xs text-muted mt-0.5 font-mono">
                 {isSimActive 
                   ? "Sandboxed simulation registry. Earliest joiner is designated failover heir." 
@@ -597,13 +602,140 @@ export function NexusFailoverHUD({
             </div>
             
             <div className="flex items-center gap-2 text-[11px] sm:text-xs font-mono bg-white/40 dark:bg-white/5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border border-white/30 dark:border-white/10 self-start sm:self-auto flex-shrink-0">
-              <Clock className="w-3.5 h-3.5 text-accent" />
+              <Clock className="w-3.5 h-3.5 text-accent flex-shrink-0" />
               <span>Next in Line: <strong className="text-accent">{isStandalone ? 'None (0 peers)' : (nextInLine?.username || 'None')}</strong></span>
             </div>
           </div>
 
-          {/* Peer Table (Responsive layout with mobile considerations) */}
-          <div className="flex-1 overflow-x-auto mt-2 sm:mt-3 scrollbar-hide">
+          {/* Mobile Portrait Peer Cards View (Optimal for portrait phones & narrow screens) */}
+          <div className="block sm:hidden space-y-2.5 mt-3">
+            {peers.map((peer) => {
+              const isHost = peer.role === 'host';
+              const isLocal = peer.peerId === (localPeerId || 'local_node') || peer.peerId === 'local_user_03';
+              const isNext = nextInLine?.peerId === peer.peerId;
+              const isDead = peer.status === 'disconnected';
+
+              return (
+                <div 
+                  key={`mobile-${peer.peerId}`}
+                  className={cn(
+                    "p-3 rounded-2xl border transition-all flex flex-col gap-2.5 shadow-sm",
+                    isDead 
+                      ? "opacity-50 bg-red-500/5 border-red-500/20" 
+                      : isHost 
+                        ? "bg-accent/10 border-accent/30" 
+                        : isNext 
+                          ? "bg-blue-500/10 border-blue-500/30" 
+                          : "bg-white/40 dark:bg-white/5 border-white/30 dark:border-white/10"
+                  )}
+                >
+                  {/* Card Header: Seq #, Avatar, Name, Status */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={cn(
+                        "px-1.5 py-0.5 rounded text-[10px] font-mono font-bold flex-shrink-0",
+                        isHost ? "bg-accent text-white" : "bg-white/60 dark:bg-white/10 text-text"
+                      )}>
+                        #{peer.joinOrder}
+                      </span>
+                      <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm flex-shrink-0", peer.avatarColor)}>
+                        {peer.username.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-text truncate flex items-center gap-1.5 text-xs">
+                          <span className="truncate">{peer.username}</span>
+                          {isLocal && (
+                            <span className="text-[8px] bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold px-1.5 py-0.2 rounded flex-shrink-0">
+                              YOU
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[9px] font-mono text-muted truncate">
+                          ID: {peer.peerId.substring(0, 10)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <span className={cn(
+                      "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold flex-shrink-0",
+                      isDead 
+                        ? "bg-red-500/20 text-red-500 border border-red-500/30" 
+                        : isStandalone
+                          ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                          : "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                    )}>
+                      <span className={cn(
+                        "w-1.5 h-1.5 rounded-full",
+                        isDead ? "bg-red-500" : isStandalone ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
+                      )} />
+                      {isDead ? "DEAD" : isStandalone ? "STANDALONE" : "ONLINE"}
+                    </span>
+                  </div>
+
+                  {/* Card Details Grid: Role, Failover Priority, Latency, Endpoint */}
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/15 dark:border-white/10 text-[10px] font-mono">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted">Role:</span>
+                      {isHost ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-accent/20 text-accent">
+                          <Crown className="w-2.5 h-2.5" /> HOST
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-white/40 dark:bg-white/10 text-muted">
+                          PEER
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 justify-end">
+                      <span className="text-muted">Rank:</span>
+                      {isDead ? (
+                        <span className="text-muted/60">—</span>
+                      ) : isHost ? (
+                        <span className="text-accent font-semibold">{isStandalone ? "Standalone" : "Active Leader"}</span>
+                      ) : isNext ? (
+                        <span className="text-blue-500 font-bold flex items-center gap-0.5">
+                          <Zap className="w-2.5 h-2.5" /> 1st Heir
+                        </span>
+                      ) : (
+                        <span className="text-muted">Rank #{peer.joinOrder}</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 col-span-2 justify-between">
+                      <span className="text-muted truncate max-w-[200px]">{peer.endpoint}</span>
+                      <span className={cn(
+                        "font-bold flex-shrink-0",
+                        peer.latencyMs < 15 ? "text-emerald-500" : peer.latencyMs < 30 ? "text-blue-500" : "text-amber-500"
+                      )}>
+                        {isDead ? "TIMEOUT" : `${peer.latencyMs}ms`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Host Transfer Action for Mobile */}
+                  {role === 'host' && !isHost && !isDead && (
+                    <button
+                      onClick={() => {
+                        if (onTransferHostControl) {
+                          onTransferHostControl(peer.peerId);
+                        } else {
+                          handleSimulateGracefulHandoff();
+                        }
+                      }}
+                      className="w-full mt-1 py-1.5 px-3 rounded-xl bg-accent text-white hover:bg-accent/90 font-medium text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-[0.98]"
+                    >
+                      <Crown className="w-3.5 h-3.5" />
+                      <span>Transfer Host Authority to {peer.username}</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop/Tablet Peer Table (Hidden on small portrait mobile screens, shown on tablet/desktop) */}
+          <div className="hidden sm:block flex-1 overflow-x-auto mt-2 sm:mt-3 scrollbar-hide">
             <table className="w-full text-left border-collapse text-xs whitespace-nowrap sm:whitespace-normal">
               <thead>
                 <tr className="border-b border-white/10 text-muted font-mono uppercase text-[9px] sm:text-[10px] tracking-wider">
