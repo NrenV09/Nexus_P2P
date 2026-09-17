@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && mkdir -p \"FINAL NEXUS\" build private && cp dist/index.html \"FINAL NEXUS/index.html\" && cp dist/index.html \"FINAL NEXUS/FinalNexus.html\" && cp dist/index.html build/finalwork.html && cp dist/index.html build/index.html && cp dist/index.html private/finalwork.html",
+    "dev": "tsx server.ts",
+    "build": "vite build && mkdir -p \"FINAL NEXUS\" build private && cp dist/index.html \"FINAL NEXUS/index.html\" && cp dist/index.html \"FINAL NEXUS/FinalNexus.html\" && cp dist/index.html build/finalwork.html && cp dist/index.html build/index.html && cp dist/index.html private/finalwork.html && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist private build",
     "lint": "tsc --noEmit"
@@ -33,6 +34,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
