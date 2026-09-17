@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && mkdir -p build private && cp dist/index.html build/finalwork.html && cp dist/index.html build/index.html && cp dist/index.html private/finalwork.html",
+    "build": "vite build && mkdir -p \"FINAL NEXUS\" build private && cp dist/index.html \"FINAL NEXUS/index.html\" && cp dist/index.html \"FINAL NEXUS/FinalNexus.html\" && cp dist/index.html build/finalwork.html && cp dist/index.html build/index.html && cp dist/index.html private/finalwork.html",
     "preview": "vite preview",
     "clean": "rm -rf dist private build",
     "lint": "tsc --noEmit"

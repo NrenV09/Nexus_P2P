@@ -121,16 +121,31 @@ export function PacketTransferAnimation({ transfer, myUsername, onCancel }: Pack
           </div>
           
           <div className="flex items-center gap-3 text-xs mt-1 bg-white/50 dark:bg-zinc-800/50 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/50 dark:border-white/5 shadow-inner">
-            <span className={cn("font-bold flex items-center gap-1", isSending ? "text-accent" : "text-success")}>
-              <Zap className="w-3 h-3" />
-              {isSending ? "Transmitting" : "Receiving"}
-            </span>
-            <div className="h-3 w-px bg-black/10 dark:bg-white/10" />
-            <span className="text-text font-mono tracking-tight font-medium">
-              {transfer.progress}% <span className="text-muted text-[10px] ml-1">({actualSizeTransferred} / {totalSize})</span>
-            </span>
+            {transfer.isWaitingForReceiver ? (
+              <span className="font-bold flex items-center gap-1.5 text-amber-500 animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block animate-ping" />
+                Waiting for receiver to click download...
+              </span>
+            ) : (
+              <>
+                <span className={cn("font-bold flex items-center gap-1", isSending ? "text-accent" : "text-success")}>
+                  <Zap className="w-3 h-3" />
+                  {isSending ? "Transmitting" : "Receiving"}
+                </span>
+                <div className="h-3 w-px bg-black/10 dark:bg-white/10" />
+                <span className="text-text font-mono tracking-tight font-medium">
+                  {transfer.progress}% <span className="text-muted text-[10px] ml-1">({actualSizeTransferred} / {totalSize})</span>
+                </span>
+              </>
+            )}
           </div>
           
+          {transfer.isWaitingForReceiver && (
+            <div className="text-[11px] text-muted text-center max-w-sm px-4 pt-1 animate-pulse">
+              Direct disk stream active. Chunks will begin transmitting as soon as the receiver accepts the download prompt on their browser.
+            </div>
+          )}
+
           {onCancel && (
             <button 
               onClick={onCancel}

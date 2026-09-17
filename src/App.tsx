@@ -20,7 +20,9 @@ import {
   Moon,
   Sun,
   PhoneCall,
-  Maximize2
+  Maximize2,
+  Info,
+  HardDrive
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -49,6 +51,8 @@ import { NexusFailoverHUD } from './components/NexusFailoverHUD';
 import { CallOverlay } from './components/CallOverlay';
 import { IncomingCallModal, IncomingCallData } from './components/IncomingCallModal';
 import { EasterEggModal, playTapTick } from './components/EasterEggModal';
+import { NexusInfoModal } from './components/NexusInfoModal';
+import { DirectDownloadPromptModal } from './components/DirectDownloadPromptModal';
 import { generateRandomName } from './lib/nameGenerator';
 
 const CHUNK_SIZE = 131072; // Max WebRTC chunk size (128KB)
@@ -82,6 +86,7 @@ export default function App() {
   });
   
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const [selectedPeerProfile, setSelectedPeerProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTabState] = useState<string>("p2p");
   const activeTabRef = useRef<string>("p2p");
@@ -217,8 +222,17 @@ export default function App() {
 
   const handleCancelTransfer = useCallback(() => {
     cancelTransferRef.current = true;
+    pendingDirectSendRef.current = null;
+    setIncomingDirectPrompt(null);
     setTransfer(null);
     fileBuffers.current.clear();
+    dataChannels.current.forEach(dc => {
+      if (dc.readyState === 'open') {
+        try {
+          dc.send(JSON.stringify({ type: 'transfer-cancel' }));
+        } catch(e) {}
+      }
+    });
     addLog("Transfer stopped / discarded", "err");
   }, [addLog]);
 
@@ -234,15 +248,89 @@ export default function App() {
 
   const [directDownloads, setDirectDownloadsState] = useState(false);
   const directDownloadsRef = useRef(false);
+  const [incomingDirectPrompt, setIncomingDirectPrompt] = useState<{ peerId: string; meta: any; } | null>(null);
+  const pendingDirectSendRef = useRef<{ file: File; startSend: () => void; } | null>(null);
+
   const setDirectDownloads = (val: boolean) => {
     setDirectDownloadsState(val);
     directDownloadsRef.current = val;
     if (val) {
-      addLog("Direct Downloads enabled: Transfers will stream directly to disk (RAM bypassed)", "ok");
+      addLog("Direct Downloads enabled: Instant prompt on receiver browser & direct disk streaming (RAM & sandbox bypassed)", "ok");
     } else {
       addLog("Direct Downloads disabled: Standard browser buffering active", "info");
     }
   };
+
+  const handleAcceptDirectDownload = useCallback(async () => {
+    if (!incomingDirectPrompt) return;
+    const { peerId, meta } = incomingDirectPrompt;
+    let handle: any = null;
+    let writable: any = null;
+
+    if ((window as any).showSaveFilePicker) {
+      try {
+        handle = await (window as any).showSaveFilePicker({
+          suggestedName: meta.name,
+          types: [{
+            description: 'Direct Disk Download',
+            accept: { [meta.mimeType || 'application/octet-stream']: [] }
+          }]
+        });
+        writable = await handle.createWritable();
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          addLog("Transfer Aborted: User cancelled direct disk save prompt", "err");
+          const dc = dataChannels.current.get(peerId);
+          if (dc && dc.readyState === 'open') {
+            dc.send(JSON.stringify({ type: 'file-download-declined', name: meta.name }));
+          }
+          setIncomingDirectPrompt(null);
+          return;
+        }
+      }
+    }
+
+    const bufferRef: any = {
+      metadata: meta,
+      receivedSize: 0,
+      chunks: [],
+      fileHandle: handle,
+      writable: writable,
+      isWriting: false,
+      isDirectDisk: true
+    };
+
+    fileBuffers.current.set(peerId, bufferRef);
+
+    setTransfer({
+      name: meta.name,
+      progress: 0,
+      type: 'receiving',
+      peerUsername: meta.senderName || peerProfiles[peerId]?.username || 'Peer',
+      transferredBytes: 0,
+      totalBytes: meta.size,
+      isDirectDisk: true
+    });
+
+    const dc = dataChannels.current.get(peerId);
+    if (dc && dc.readyState === 'open') {
+      dc.send(JSON.stringify({ type: 'file-download-accepted', name: meta.name }));
+    }
+
+    addLog(`Direct download accepted for ${meta.name}. Streaming directly to disk (RAM & drop zone sandbox bypassed)...`, "ok");
+    setIncomingDirectPrompt(null);
+  }, [incomingDirectPrompt, addLog, peerProfiles]);
+
+  const handleDeclineDirectDownload = useCallback(() => {
+    if (!incomingDirectPrompt) return;
+    const { peerId, meta } = incomingDirectPrompt;
+    const dc = dataChannels.current.get(peerId);
+    if (dc && dc.readyState === 'open') {
+      dc.send(JSON.stringify({ type: 'file-download-declined', name: meta.name }));
+    }
+    addLog(`Direct download of ${meta.name} declined by user`, "err");
+    setIncomingDirectPrompt(null);
+  }, [incomingDirectPrompt, addLog]);
 
   const [bandwidthOptimized, setBandwidthOptimized] = useState(false);
 
@@ -849,6 +937,23 @@ export default function App() {
               }
             }
           } else if (data.type === 'file-meta') {
+            // Direct Downloads: Prompts receiver's browser immediately to download to disk (bypasses RAM & drop zone sandbox)
+            if (data.bypassRam || directDownloadsRef.current) {
+              addLog(`Direct download requested for ${data.name}. Prompting browser to download...`, "info");
+              setIncomingDirectPrompt({
+                peerId,
+                meta: data
+              });
+              if (roleRef.current === 'host') {
+                dataChannels.current.forEach((dc, otherId) => {
+                  if (otherId !== peerId && dc.readyState === 'open') {
+                    dc.send(event.data);
+                  }
+                });
+              }
+              return;
+            }
+
             const bufferRef: any = { 
               metadata: data, 
               receivedSize: 0, 
@@ -859,34 +964,7 @@ export default function App() {
               isDirectDisk: false
             };
             
-            // Direct Downloads: Prompt browser immediately to save directly to disk (bypasses RAM completely)
-            if (directDownloadsRef.current && (window as any).showSaveFilePicker) {
-              try {
-                const handle = await (window as any).showSaveFilePicker({
-                  suggestedName: data.name,
-                  types: [{
-                    description: 'Direct Disk Download',
-                    accept: { [data.mimeType || 'application/octet-stream']: [] }
-                  }]
-                });
-                bufferRef.fileHandle = handle;
-                bufferRef.writable = await handle.createWritable();
-                bufferRef.isDirectDisk = true;
-                addLog(`Direct download initiated: Writing ${data.name} directly to disk (RAM bypassed)`, "ok");
-              } catch (err: any) {
-                if (err.name === 'AbortError') {
-                  addLog("Transfer Aborted: User cancelled direct disk save prompt", "err");
-                  setTransfer(null);
-                  fileBuffers.current.delete(peerId);
-                  return;
-                } else {
-                  addLog(`Transfer Aborted: ${err.message || err}`, "err");
-                  setTransfer(null);
-                  fileBuffers.current.delete(peerId);
-                  return;
-                }
-              }
-            } else if (navigator.storage && navigator.storage.getDirectory) {
+            if (navigator.storage && navigator.storage.getDirectory) {
               navigator.storage.getDirectory().then(async root => {
                 try {
                   const safeName = data.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
@@ -908,7 +986,7 @@ export default function App() {
               transferredBytes: 0,
               totalBytes: data.size
             });
-            addLog(`Incoming payload: ${data.name}${bufferRef.isDirectDisk ? ' [Direct Disk]' : ''}`, "info");
+            addLog(`Incoming payload: ${data.name}`, "info");
             if (roleRef.current === 'host') {
               dataChannels.current.forEach((dc, otherId) => {
                 if (otherId !== peerId && dc.readyState === 'open') {
@@ -916,6 +994,22 @@ export default function App() {
                 }
               });
             }
+          } else if (data.type === 'file-download-accepted') {
+            addLog(`Receiver clicked download for ${data.name}! Transmitting direct disk stream...`, "ok");
+            if (pendingDirectSendRef.current && pendingDirectSendRef.current.file.name === data.name) {
+              setTransfer(prev => prev ? { ...prev, isWaitingForReceiver: false, statusMessage: undefined } : null);
+              pendingDirectSendRef.current.startSend();
+              pendingDirectSendRef.current = null;
+            }
+          } else if (data.type === 'file-download-declined') {
+            addLog(`Transfer cancelled: Receiver cancelled download prompt for ${data.name}`, "err");
+            setTransfer(null);
+            pendingDirectSendRef.current = null;
+          } else if (data.type === 'transfer-cancel') {
+            addLog("Transfer cancelled by peer", "err");
+            setTransfer(null);
+            setIncomingDirectPrompt(null);
+            fileBuffers.current.delete(peerId);
           } else if (data.type === 'call-invite') {
             addLog(`Incoming ${data.callType} call from ${data.callerName || 'peer'}`, "info");
             setIncomingCall({
@@ -998,7 +1092,7 @@ export default function App() {
                     if (buffer.receivedSize >= buffer.metadata.size && buffer.chunks.length === 0) {
                       await buffer.writable.close();
                       triggerTransferAnimation();
-                      addLog(`Direct download complete: ${buffer.metadata.name} written directly to disk`, "ok");
+                      addLog(`Direct download complete: ${buffer.metadata.name} saved directly to disk (RAM & drop zone sandbox bypassed)`, "ok");
                       finishFileReceive(buffer, null);
                     }
                   } catch (diskErr: any) {
@@ -1009,6 +1103,14 @@ export default function App() {
                     buffer.isWriting = false;
                   }
                 })();
+              }
+            } else {
+              // Fallback on browsers without showSaveFilePicker: assemble for immediate direct download without sandboxing in drop zone
+              buffer.chunks.push(event.data);
+              if (buffer.receivedSize >= buffer.metadata.size) {
+                triggerTransferAnimation();
+                const blob = new Blob(buffer.chunks, { type: buffer.metadata.mimeType });
+                finishFileReceive(buffer, blob);
               }
             }
           } else {
@@ -1067,31 +1169,43 @@ export default function App() {
       const senderId = buffer.metadata.senderId;
       const isDirectDisk = buffer.isDirectDisk;
       
-      setFiles(prev => [{
-        id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
-        name,
-        blob: blob || new Blob([], { type: buffer.metadata.mimeType || 'application/octet-stream' }),
-        size,
-        senderName,
-        senderColor,
-        senderId,
-        timestamp: new Date(),
-        direction: 'in'
-      }, ...prev]);
+      // Bypass RAM / Direct disk downloads do NOT sandbox the file in the file drop zone!
+      if (!isDirectDisk) {
+        setFiles(prev => [{
+          id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
+          name,
+          blob: blob || new Blob([], { type: buffer.metadata.mimeType || 'application/octet-stream' }),
+          size,
+          senderName,
+          senderColor,
+          senderId,
+          timestamp: new Date(),
+          direction: 'in'
+        }, ...prev]);
+      }
       
       setMessages(prev => [...prev, {
         id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
-        text: `📁 Received: ${name}${isDirectDisk ? ' (Saved directly to Disk)' : ''}`,
+        text: `📁 Received: ${name}${isDirectDisk ? ' (Downloaded directly to disk — Bypassed RAM & drop zone sandbox)' : ''}`,
         sender: 'system',
         timestamp: new Date()
       }]);
       
       setTransfer(null);
       fileBuffers.current.delete(peerId);
-      addLog(`Payload received: ${name}${isDirectDisk ? ' (Saved to disk)' : ''}`, "ok");
+      addLog(`Payload received: ${name}${isDirectDisk ? ' (Saved directly to disk — Not sandboxed in drop zone)' : ''}`, "ok");
       
-      // Auto-download to browser folder if not already written to disk
-      if (!isDirectDisk && autoDownloadRef.current && blob) {
+      // Auto-download to browser folder
+      if (isDirectDisk && !buffer.writable && blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } else if (!isDirectDisk && autoDownloadRef.current && blob) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -1167,17 +1281,23 @@ export default function App() {
   }, [setupDataChannel, addLog]);
 
   const waitForIce = (pc: RTCPeerConnection) => new Promise<void>((resolve) => {
-    if (pc.iceGatheringState === 'complete') resolve();
-    else {
-      const check = () => {
-        if (pc.iceGatheringState === 'complete') {
-          pc.removeEventListener('icegatheringstatechange', check);
-          resolve();
-        }
-      };
-      pc.addEventListener('icegatheringstatechange', check);
-      setTimeout(resolve, 3000);
+    if (pc.iceGatheringState === 'complete') {
+      resolve();
+      return;
     }
+    const check = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', check);
+        resolve();
+      }
+    };
+    pc.addEventListener('icegatheringstatechange', check);
+    // When offline or on local LAN airgap, host candidates gather in <600ms; resolve promptly without blocking on unreachable STUN servers
+    const timeout = typeof navigator !== 'undefined' && !navigator.onLine ? 800 : 2500;
+    setTimeout(() => {
+      pc.removeEventListener('icegatheringstatechange', check);
+      resolve();
+    }, timeout);
   });
 
   const createHostOffer = async () => {
@@ -1669,7 +1789,8 @@ export default function App() {
 
   const sendFile = async (file: File) => {
     if (dataChannels.current.size === 0) return;
-    addLog(`Initiating transfer: ${file.name}`, "info");
+    const isDirect = directDownloadsRef.current;
+    addLog(`Initiating transfer: ${file.name}${isDirect ? ' (Bypass RAM Limits)' : ''}`, "info");
     
     const meta = JSON.stringify({
       type: 'file-meta',
@@ -1678,31 +1799,28 @@ export default function App() {
       mimeType: file.type,
       senderName: profile.username,
       senderColor: profile.avatarColor,
-      senderId: profile.id
+      senderId: profile.id,
+      bypassRam: isDirect
     });
 
     dataChannels.current.forEach(dc => {
       if (dc.readyState === 'open') dc.send(meta);
     });
 
-    setFiles(prev => [{
-      id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
-      name: file.name,
-      size: file.size,
-      senderName: profile.username,
-      senderColor: profile.avatarColor,
-      timestamp: new Date(),
-      direction: 'out'
-    }, ...prev]);
+    // Bypass RAM / Direct Downloads: Do not sandbox the file in the drop zone
+    if (!isDirect) {
+      setFiles(prev => [{
+        id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
+        name: file.name,
+        size: file.size,
+        senderName: profile.username,
+        senderColor: profile.avatarColor,
+        timestamp: new Date(),
+        direction: 'out'
+      }, ...prev]);
+    }
 
-    setTransfer({ 
-      name: file.name, 
-      progress: 0, 
-      type: 'sending',
-      peerUsername: dataChannels.current.size === 1 ? (Object.values(peerProfiles) as any[])[0]?.username || 'Peer' : 'Group',
-      transferredBytes: 0,
-      totalBytes: file.size
-    });
+    const peerTarget = dataChannels.current.size === 1 ? (Object.values(peerProfiles) as any[])[0]?.username || 'Peer' : 'Group';
 
     let offset = 0;
     cancelTransferRef.current = false;
@@ -1751,12 +1869,43 @@ export default function App() {
         checkBuffer();
       } else {
         triggerTransferAnimation();
-        addLog(`Sent payload: ${file.name}`, "ok");
+        addLog(`Sent payload: ${file.name}${isDirect ? ' (Streamed directly to receiver disk)' : ''}`, "ok");
         setTimeout(() => setTransfer(null), 1000);
       }
     };
 
-    readSlice();
+    if (isDirect) {
+      pendingDirectSendRef.current = {
+        file,
+        startSend: () => {
+          readSlice();
+        }
+      };
+
+      setTransfer({ 
+        name: file.name, 
+        progress: 0, 
+        type: 'sending',
+        peerUsername: peerTarget,
+        transferredBytes: 0,
+        totalBytes: file.size,
+        isWaitingForReceiver: true,
+        statusMessage: "Waiting for receiver to click download...",
+        isDirectDisk: true
+      });
+      addLog(`Waiting for receiver to click download on their browser for ${file.name}...`, "info");
+    } else {
+      setTransfer({ 
+        name: file.name, 
+        progress: 0, 
+        type: 'sending',
+        peerUsername: peerTarget,
+        transferredBytes: 0,
+        totalBytes: file.size,
+        isWaitingForReceiver: false
+      });
+      readSlice();
+    }
   };
 
   return (
@@ -1780,6 +1929,22 @@ export default function App() {
           <ViewProfileModal
             profile={selectedPeerProfile}
             onClose={() => setSelectedPeerProfile(null)}
+          />
+        )}
+        {showInfoModal && (
+          <NexusInfoModal
+            isOpen={showInfoModal}
+            onClose={() => setShowInfoModal(false)}
+          />
+        )}
+        {incomingDirectPrompt && (
+          <DirectDownloadPromptModal
+            isOpen={!!incomingDirectPrompt}
+            fileName={incomingDirectPrompt.meta.name}
+            fileSize={incomingDirectPrompt.meta.size}
+            senderName={incomingDirectPrompt.meta.senderName || 'Peer'}
+            onAccept={handleAcceptDirectDownload}
+            onDecline={handleDeclineDirectDownload}
           />
         )}
       </AnimatePresence>
@@ -1897,6 +2062,16 @@ export default function App() {
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
           )}
+
+          {/* Light button (INFO) icon beside the profile icon */}
+          <button
+            onClick={() => setShowInfoModal(true)}
+            className="w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 flex items-center justify-center text-sky-500 dark:text-sky-400 hover:text-sky-600 dark:hover:text-sky-300 transition-all border border-sky-500/30 dark:border-sky-400/30 bg-sky-500/10 dark:bg-sky-400/10 hover:bg-sky-500/20 dark:hover:bg-sky-400/20 backdrop-blur rounded-xl lg:rounded-2xl shadow-sm hover:scale-105 cursor-pointer flex-shrink-0"
+            title="App Manual & Connection Guide (Info)"
+            aria-label="App Manual and Connection Guide"
+          >
+            <Info className="w-4 h-4 lg:w-5 lg:h-5" />
+          </button>
 
           <button
             onClick={() => setShowProfileModal(true)}
@@ -2271,16 +2446,22 @@ export default function App() {
                         <button onClick={handleClearCache} className="px-3 py-1 rounded bg-white/20 dark:bg-white/5 border border-white/30 dark:border-white/10 hover:bg-white/30 dark:hover:bg-white/10 transition-colors text-text shadow-sm cursor-pointer text-xs font-medium">
                           Clear App Caches
                         </button>
-                        <div className="flex items-center gap-3">
-                          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer hover:text-text transition-colors">
-                            <input 
-                              type="checkbox" 
-                              checked={directDownloads} 
-                              onChange={(e) => setDirectDownloads(e.target.checked)} 
-                              className="rounded border-white/20 bg-transparent text-accent focus:ring-accent"
-                            />
-                            Direct Downloads (Bypass RAM Limits)
-                          </label>
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setDirectDownloads(!directDownloads)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border shadow-sm cursor-pointer",
+                              directDownloads 
+                                ? "bg-accent/20 border-accent text-accent shadow-[0_0_12px_rgba(0,122,255,0.25)]" 
+                                : "bg-white/30 dark:bg-white/5 border-white/30 dark:border-white/10 text-muted hover:text-text hover:bg-white/50"
+                            )}
+                            title="Direct disk streaming: Bypasses RAM and drop zone sandboxing, instantly prompts receiver browser to download straight to disk."
+                          >
+                            <HardDrive className="w-3.5 h-3.5" />
+                            <span>Download Bypass RAM Limits</span>
+                            <span className={cn("w-2 h-2 rounded-full", directDownloads ? "bg-accent animate-pulse" : "bg-muted/40")} />
+                          </button>
                           <label className="flex items-center gap-2 text-xs text-muted cursor-pointer hover:text-text transition-colors">
                             <input 
                               type="checkbox" 

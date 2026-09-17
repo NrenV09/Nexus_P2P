@@ -31,6 +31,9 @@ export interface TransferProgress {
   peerUsername: string;
   transferredBytes: number;
   totalBytes: number;
+  statusMessage?: string;
+  isWaitingForReceiver?: boolean;
+  isDirectDisk?: boolean;
 }
 
 export interface LogEntry {
