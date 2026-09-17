@@ -54,6 +54,7 @@ import { EasterEggModal, playTapTick } from './components/EasterEggModal';
 import { NexusInfoModal } from './components/NexusInfoModal';
 import { DirectDownloadPromptModal } from './components/DirectDownloadPromptModal';
 import { generateRandomName } from './lib/nameGenerator';
+import { createSafeDiskWriter, triggerBrowserFileDownload } from './lib/diskStreamer';
 
 const CHUNK_SIZE = 131072; // Max WebRTC chunk size (128KB)
 
@@ -170,6 +171,7 @@ export default function App() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isCallActive, setIsCallActive] = useState(false);
   const [isCallMinimized, setIsCallMinimized] = useState(false);
+  const [screenSharingPeers, setScreenSharingPeers] = useState<Record<string, boolean>>({});
   const isCallActiveRef = useRef(false);
   useEffect(() => {
     isCallActiveRef.current = isCallActive;
@@ -264,61 +266,54 @@ export default function App() {
   const handleAcceptDirectDownload = useCallback(async () => {
     if (!incomingDirectPrompt) return;
     const { peerId, meta } = incomingDirectPrompt;
-    let handle: any = null;
-    let writable: any = null;
 
-    if ((window as any).showSaveFilePicker) {
-      try {
-        handle = await (window as any).showSaveFilePicker({
-          suggestedName: meta.name,
-          types: [{
-            description: 'Direct Disk Download',
-            accept: { [meta.mimeType || 'application/octet-stream']: [] }
-          }]
-        });
-        writable = await handle.createWritable();
-      } catch (err: any) {
-        if (err.name === 'AbortError') {
-          addLog("Transfer Aborted: User cancelled direct disk save prompt", "err");
-          const dc = dataChannels.current.get(peerId);
-          if (dc && dc.readyState === 'open') {
-            dc.send(JSON.stringify({ type: 'file-download-declined', name: meta.name }));
-          }
-          setIncomingDirectPrompt(null);
-          return;
-        }
+    try {
+      const { writer, mode, warning } = await createSafeDiskWriter(meta.name, meta.size, meta.mimeType);
+      if (warning) {
+        addLog(warning, "info");
       }
+
+      const bufferRef: any = {
+        metadata: meta,
+        receivedSize: 0,
+        chunks: [],
+        writer: writer,
+        isWriting: false,
+        isDirectDisk: true
+      };
+
+      fileBuffers.current.set(peerId, bufferRef);
+
+      setTransfer({
+        name: meta.name,
+        progress: 0,
+        type: 'receiving',
+        peerUsername: meta.senderName || peerProfiles[peerId]?.username || 'Peer',
+        transferredBytes: 0,
+        totalBytes: meta.size,
+        isDirectDisk: true
+      });
+
+      const dc = dataChannels.current.get(peerId);
+      if (dc && dc.readyState === 'open') {
+        dc.send(JSON.stringify({ type: 'file-download-accepted', name: meta.name }));
+      }
+
+      addLog(`Direct download accepted for ${meta.name} [${mode.toUpperCase()} Disk Pipeline]. RAM bypassed.`, "ok");
+      setIncomingDirectPrompt(null);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        addLog("Transfer Aborted: User cancelled direct disk save prompt", "err");
+        const dc = dataChannels.current.get(peerId);
+        if (dc && dc.readyState === 'open') {
+          dc.send(JSON.stringify({ type: 'file-download-declined', name: meta.name }));
+        }
+        setIncomingDirectPrompt(null);
+        return;
+      }
+      addLog(`Direct download initiation failed: ${err?.message || err}`, "err");
+      setIncomingDirectPrompt(null);
     }
-
-    const bufferRef: any = {
-      metadata: meta,
-      receivedSize: 0,
-      chunks: [],
-      fileHandle: handle,
-      writable: writable,
-      isWriting: false,
-      isDirectDisk: true
-    };
-
-    fileBuffers.current.set(peerId, bufferRef);
-
-    setTransfer({
-      name: meta.name,
-      progress: 0,
-      type: 'receiving',
-      peerUsername: meta.senderName || peerProfiles[peerId]?.username || 'Peer',
-      transferredBytes: 0,
-      totalBytes: meta.size,
-      isDirectDisk: true
-    });
-
-    const dc = dataChannels.current.get(peerId);
-    if (dc && dc.readyState === 'open') {
-      dc.send(JSON.stringify({ type: 'file-download-accepted', name: meta.name }));
-    }
-
-    addLog(`Direct download accepted for ${meta.name}. Streaming directly to disk (RAM & drop zone sandbox bypassed)...`, "ok");
-    setIncomingDirectPrompt(null);
   }, [incomingDirectPrompt, addLog, peerProfiles]);
 
   const handleDeclineDirectDownload = useCallback(() => {
@@ -1031,7 +1026,32 @@ export default function App() {
             }
           } else if (data.type === 'call-decline') {
             addLog(`Call declined by ${data.by || 'peer'}`, "err");
+            const pc = peerConnections.current.get(peerId);
+            if (pc && pc.signalingState !== 'stable') {
+              try {
+                await pc.setLocalDescription({ type: 'rollback' });
+              } catch (e) {
+                console.warn("Rollback on call-decline:", e);
+              }
+            }
             endCallRef.current?.();
+          } else if (data.type === 'screen-share-state') {
+            setCallType('video');
+            if (data.sharing) {
+              setScreenSharingPeers(prev => ({ ...prev, [peerId]: true }));
+              setPeerTrackStates(prev => ({
+                ...prev,
+                [peerId]: { ...prev[peerId], video: true }
+              }));
+              addLog(`${data.username || 'Peer'} started sharing their screen`, "ok");
+            } else {
+              setScreenSharingPeers(prev => {
+                const next = { ...prev };
+                delete next[peerId];
+                return next;
+              });
+              addLog(`${data.username || 'Peer'} stopped sharing their screen`, "info");
+            }
           } else if (data.type === 'call-track-state') {
             setPeerTrackStates(prev => ({
               ...prev,
@@ -1053,14 +1073,23 @@ export default function App() {
               }
             }
           } else if (data.type === 'media-offer') {
+            setCallType('video');
             const pc = peerConnections.current.get(peerId);
             if (pc) {
-              await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-              const dc = dataChannels.current.get(peerId);
-              if (dc && dc.readyState === 'open') {
-                dc.send(JSON.stringify({ type: 'media-answer', sdp: pc.localDescription }));
+              try {
+                if (pc.signalingState !== 'stable') {
+                  try { await pc.setLocalDescription({ type: 'rollback' }); } catch (_) {}
+                }
+                await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                await waitForIce(pc);
+                const dc = dataChannels.current.get(peerId);
+                if (dc && dc.readyState === 'open') {
+                  dc.send(JSON.stringify({ type: 'media-answer', sdp: pc.localDescription }));
+                }
+              } catch (e) {
+                console.error("media-offer error:", e);
               }
             }
           } else if (data.type === 'media-answer') {
@@ -1079,7 +1108,39 @@ export default function App() {
 
           if (buffer.isDirectDisk) {
             // Direct disk streaming without keeping in RAM
-            if (buffer.writable) {
+            if (buffer.writer) {
+              buffer.chunks.push(event.data);
+              if (!buffer.isWriting) {
+                buffer.isWriting = true;
+                (async () => {
+                  try {
+                    while (buffer.chunks.length > 0) {
+                      const chunk = buffer.chunks.shift();
+                      if (chunk) {
+                        await buffer.writer.write(chunk);
+                      }
+                    }
+                    if (buffer.receivedSize >= buffer.metadata.size && buffer.chunks.length === 0) {
+                      const finalFileOrBlob = await buffer.writer.close();
+                      triggerTransferAnimation();
+                      addLog(`Direct download complete: ${buffer.metadata.name} (${buffer.writer.mode.toUpperCase()} disk stream complete)`, "ok");
+                      finishFileReceive(buffer, finalFileOrBlob);
+                    }
+                  } catch (streamErr: any) {
+                    addLog(`Transfer Aborted: ${streamErr?.message || streamErr}`, "err");
+                    try { await buffer.writer.abort(); } catch (_) {}
+                    setTransfer(null);
+                    fileBuffers.current.delete(peerId);
+                    const dc = dataChannels.current.get(peerId);
+                    if (dc && dc.readyState === 'open') {
+                      dc.send(JSON.stringify({ type: 'transfer-cancel', name: buffer.metadata.name }));
+                    }
+                  } finally {
+                    buffer.isWriting = false;
+                  }
+                })();
+              }
+            } else if (buffer.writable) {
               buffer.chunks.push(event.data);
               if (!buffer.isWriting) {
                 buffer.isWriting = true;
@@ -1105,7 +1166,7 @@ export default function App() {
                 })();
               }
             } else {
-              // Fallback on browsers without showSaveFilePicker: assemble for immediate direct download without sandboxing in drop zone
+              // Fallback on browsers without showSaveFilePicker or OPFS: assemble for immediate direct download without sandboxing in drop zone
               buffer.chunks.push(event.data);
               if (buffer.receivedSize >= buffer.metadata.size) {
                 triggerTransferAnimation();
@@ -1196,24 +1257,10 @@ export default function App() {
       addLog(`Payload received: ${name}${isDirectDisk ? ' (Saved directly to disk — Not sandboxed in drop zone)' : ''}`, "ok");
       
       // Auto-download to browser folder
-      if (isDirectDisk && !buffer.writable && blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      if (isDirectDisk && blob) {
+        triggerBrowserFileDownload(blob, name);
       } else if (!isDirectDisk && autoDownloadRef.current && blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        triggerBrowserFileDownload(blob, name);
       }
     };
   }, [addLog]);
@@ -1476,6 +1523,14 @@ export default function App() {
 
     // Attach local tracks and notify all peers via call-invite with offer SDP
     peerConnections.current.forEach(async (pc, peerId) => {
+      if (pc.signalingState !== 'stable') {
+        try {
+          await pc.setLocalDescription({ type: 'rollback' });
+        } catch (e) {
+          console.warn("Rollback before call invite:", e);
+        }
+      }
+
       stream.getTracks().forEach(track => {
         if (!pc.getSenders().find(s => s.track === track)) {
           pc.addTrack(track, stream);
@@ -1535,6 +1590,9 @@ export default function App() {
     const pc = peerConnections.current.get(incoming.peerId);
     if (pc) {
       try {
+        if (pc.signalingState !== 'stable') {
+          try { await pc.setLocalDescription({ type: 'rollback' }); } catch (_) {}
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(incoming.sdp));
         stream.getTracks().forEach(track => {
           if (!pc.getSenders().find(s => s.track === track)) {
@@ -1557,9 +1615,17 @@ export default function App() {
     }
   };
 
-  const declineCall = (incoming: IncomingCallData) => {
+  const declineCall = async (incoming: IncomingCallData) => {
     stopRingChime();
     setIncomingCall(null);
+    const pc = peerConnections.current.get(incoming.peerId);
+    if (pc && pc.signalingState !== 'stable') {
+      try {
+        await pc.setLocalDescription({ type: 'rollback' });
+      } catch (e) {
+        console.warn("Callee rollback on decline:", e);
+      }
+    }
     const dc = dataChannels.current.get(incoming.peerId);
     if (dc && dc.readyState === 'open') {
       dc.send(JSON.stringify({
@@ -1609,6 +1675,11 @@ export default function App() {
     remoteStreamsRef.current = {};
 
     peerConnections.current.forEach(pc => {
+      if (pc.signalingState !== 'stable') {
+        try {
+          pc.setLocalDescription({ type: 'rollback' });
+        } catch (e) {}
+      }
       pc.getSenders().forEach(sender => {
         if (sender.track) {
           try {
@@ -1621,6 +1692,7 @@ export default function App() {
     const hadActiveCall = isCallActiveRef.current || isCallActive;
     setIsCallActive(false);
     setIsCallMinimized(false);
+    setScreenSharingPeers({});
     setCallType(null);
     setRemoteStreams({});
     setPeerTrackStates({});
@@ -1682,8 +1754,29 @@ export default function App() {
     });
   };
 
+  const handleToggleScreenShare = (sharing: boolean) => {
+    setCallType('video');
+    dataChannels.current.forEach(dc => {
+      if (dc.readyState === 'open') {
+        try {
+          dc.send(JSON.stringify({
+            type: 'screen-share-state',
+            peerId: profile.id,
+            username: profile.username,
+            sharing
+          }));
+        } catch (e) {}
+      }
+    });
+  };
+
   const handleAddTrack = async (track: MediaStreamTrack) => {
     setCallType('video');
+    if (track.kind === 'video') {
+      try {
+        (track as any).contentHint = 'detail';
+      } catch (_) {}
+    }
     peerConnections.current.forEach(async (pc, peerId) => {
       // If a video sender already exists, replace track directly for seamless transition
       const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
@@ -1703,6 +1796,9 @@ export default function App() {
       }
 
       try {
+        if (pc.signalingState !== 'stable') {
+          try { await pc.setLocalDescription({ type: 'rollback' }); } catch (_) {}
+        }
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await waitForIce(pc);
@@ -2750,6 +2846,7 @@ export default function App() {
         remoteStreams={remoteStreams}
         peerProfiles={peerProfiles}
         peerTrackStates={peerTrackStates}
+        screenSharingPeers={screenSharingPeers}
         getPeerName={(peerId) => {
           const profId = peerIdToProfileId.current.get(peerId);
           if (profId && peerProfiles[profId]?.username) return peerProfiles[profId].username;
@@ -2761,6 +2858,7 @@ export default function App() {
         onEndCall={endCall}
         onToggleTrack={handleToggleTrack}
         onRequestAddTrack={handleAddTrack}
+        onToggleScreenShare={handleToggleScreenShare}
         isMinimized={isCallMinimized}
         onToggleMinimize={() => setIsCallMinimized(prev => !prev)}
       />

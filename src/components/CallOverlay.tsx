@@ -6,6 +6,7 @@ import {
   MicOff, 
   Video, 
   VideoOff, 
+  Monitor,
   MonitorUp,
   Users,
   Volume2,
@@ -100,10 +101,12 @@ export function CallOverlay({
   remoteStreams,
   peerProfiles,
   peerTrackStates,
+  screenSharingPeers,
   getPeerName,
   onEndCall,
   onToggleTrack,
   onRequestAddTrack,
+  onToggleScreenShare,
   isMinimized = false,
   onToggleMinimize
 }: {
@@ -113,10 +116,12 @@ export function CallOverlay({
   remoteStreams: Record<string, MediaStream>;
   peerProfiles?: Record<string, UserProfile>;
   peerTrackStates?: Record<string, { video?: boolean; audio?: boolean }>;
+  screenSharingPeers?: Record<string, boolean>;
   getPeerName?: (peerId: string) => string;
   onEndCall: () => void;
   onToggleTrack?: (kind: 'audio' | 'video', enabled: boolean) => void;
   onRequestAddTrack?: (track: MediaStreamTrack) => void;
+  onToggleScreenShare?: (sharing: boolean) => void;
   isMinimized?: boolean;
   onToggleMinimize?: () => void;
 }) {
@@ -218,6 +223,21 @@ export function CallOverlay({
     onToggleTrack?.('video', newEnabled);
   };
 
+  // Auto-spotlight peer when they start sharing screen and enforce contain mode
+  useEffect(() => {
+    if (!screenSharingPeers) return;
+    const activeSharer = Object.keys(screenSharingPeers).find(id => screenSharingPeers[id]);
+    if (activeSharer) {
+      setViewMode('spotlight');
+      setSpotlightId(activeSharer);
+      setTileFitModes(prev => ({ ...prev, [activeSharer]: 'contain' }));
+    } else if (spotlightId && spotlightId !== 'local' && !screenSharingPeers[spotlightId]) {
+      // Revert to grid when screen share ends
+      setViewMode('grid');
+      setSpotlightId(null);
+    }
+  }, [screenSharingPeers]);
+
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
       if (screenTrackRef.current) {
@@ -226,12 +246,18 @@ export function CallOverlay({
       }
       setScreenTrack(null);
       setIsScreenSharing(false);
+      onToggleScreenShare?.(false);
+      if (spotlightId === 'local') {
+        setViewMode('grid');
+        setSpotlightId(null);
+      }
       // Resume camera track
       if (localStream) {
         const camTrack = localStream.getVideoTracks().find(t => t !== screenTrackRef.current && t.readyState === 'live');
         if (camTrack) {
           camTrack.enabled = true;
           onRequestAddTrack?.(camTrack);
+          onToggleTrack?.('video', true);
         }
       }
       return;
@@ -245,6 +271,7 @@ export function CallOverlay({
       const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       const newTrack = displayStream.getVideoTracks()[0];
       if (!newTrack) return;
+      newTrack.contentHint = 'detail';
 
       screenTrackRef.current = newTrack;
       setScreenTrack(newTrack);
@@ -260,6 +287,7 @@ export function CallOverlay({
         localStream.addTrack(newTrack);
       }
 
+      onToggleScreenShare?.(true);
       onRequestAddTrack?.(newTrack);
       onToggleTrack?.('video', true);
 
@@ -267,6 +295,11 @@ export function CallOverlay({
         setIsScreenSharing(false);
         setScreenTrack(null);
         screenTrackRef.current = null;
+        onToggleScreenShare?.(false);
+        if (spotlightId === 'local') {
+          setViewMode('grid');
+          setSpotlightId(null);
+        }
         if (localStream) {
           try {
             localStream.removeTrack(newTrack);
@@ -275,6 +308,7 @@ export function CallOverlay({
           if (camTrack) {
             camTrack.enabled = true;
             onRequestAddTrack?.(camTrack);
+            onToggleTrack?.('video', true);
           }
         }
       };
@@ -633,6 +667,7 @@ export function CallOverlay({
                               stream={remoteStreams[effectiveSpotlightId]}
                               isRemoteVideoOff={peerTrackStates?.[effectiveSpotlightId]?.video === false || (type === 'audio' && peerTrackStates?.[effectiveSpotlightId]?.video !== true)}
                               isRemoteAudioMuted={peerTrackStates?.[effectiveSpotlightId]?.audio === false}
+                              isScreenSharing={!!screenSharingPeers?.[effectiveSpotlightId]}
                               fitMode={tileFitModes[effectiveSpotlightId] || 'contain'}
                               isSpotlightStage={true}
                               onToggleFit={() => toggleTileFit(effectiveSpotlightId)}
@@ -691,6 +726,7 @@ export function CallOverlay({
                                 stream={stream}
                                 isRemoteVideoOff={trackState?.video === false || (type === 'audio' && trackState?.video !== true)}
                                 isRemoteAudioMuted={trackState?.audio === false}
+                                isScreenSharing={!!screenSharingPeers?.[id]}
                                 fitMode={tileFitModes[id] || 'contain'}
                                 isThumbnail={true}
                               />
@@ -749,6 +785,7 @@ export function CallOverlay({
                               stream={stream}
                               isRemoteVideoOff={trackState?.video === false || (type === 'audio' && trackState?.video !== true)}
                               isRemoteAudioMuted={trackState?.audio === false}
+                              isScreenSharing={!!screenSharingPeers?.[id]}
                               fitMode={tileFitModes[id] || 'contain'}
                               onToggleFit={() => toggleTileFit(id)}
                               onSpotlight={() => handleSpotlight(id)}
@@ -1104,6 +1141,7 @@ function RemoteVideoTile({
   name,
   isRemoteVideoOff,
   isRemoteAudioMuted,
+  isScreenSharing = false,
   fitMode = 'contain',
   isSpotlightStage = false,
   isThumbnail = false,
@@ -1116,6 +1154,7 @@ function RemoteVideoTile({
   name: string; 
   isRemoteVideoOff?: boolean;
   isRemoteAudioMuted?: boolean;
+  isScreenSharing?: boolean;
   fitMode?: 'contain' | 'cover';
   isSpotlightStage?: boolean;
   isThumbnail?: boolean;
@@ -1152,10 +1191,13 @@ function RemoteVideoTile({
   }, [stream]);
 
   useEffect(() => {
-    if (!isRemoteVideoOff && videoRef.current && hasVideoTrack) {
+    if ((!isRemoteVideoOff || isScreenSharing) && videoRef.current) {
+      if (videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
+      }
       videoRef.current.play().catch(e => console.warn("Remote video resume play error:", e));
     }
-  }, [isRemoteVideoOff, hasVideoTrack]);
+  }, [isRemoteVideoOff, hasVideoTrack, isScreenSharing, stream]);
 
   const handleMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const vid = e.currentTarget;
@@ -1166,13 +1208,21 @@ function RemoteVideoTile({
   };
 
   const initials = (name || id || "Node").substring(0, 2).toUpperCase();
-  const showVideo = hasVideoTrack && !isRemoteVideoOff;
+  const showVideo = (hasVideoTrack && !isRemoteVideoOff) || isScreenSharing;
 
   return (
     <div className={cn(
       "w-full h-full flex items-center justify-center relative overflow-hidden bg-[#0d0e12]",
       isRemoteSpeaking && !isThumbnail && "ring-2 ring-emerald-400/80 shadow-[0_0_24px_rgba(52,211,153,0.3)]"
     )}>
+      {/* Screen Sharing Badge */}
+      {isScreenSharing && !isThumbnail && (
+        <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-600/90 backdrop-blur-md text-white text-[11px] font-semibold border border-blue-400/40 shadow-lg">
+          <Monitor className="w-3.5 h-3.5" />
+          <span>{name}'s Screen</span>
+        </div>
+      )}
+
       {/* Video Element: uses object-contain by default so landscape iPad screen shares never crop */}
       <video 
         ref={videoRef} 

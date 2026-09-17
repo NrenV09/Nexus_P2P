@@ -1,7 +1,8 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { HardDrive, Download, X, ShieldCheck, User, Zap } from 'lucide-react';
+import { HardDrive, Download, X, ShieldCheck, User, Smartphone, Monitor } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { getDiskStreamSupport } from '../lib/diskStreamer';
 
 interface DirectDownloadPromptModalProps {
   isOpen: boolean;
@@ -28,6 +29,8 @@ export const DirectDownloadPromptModal: React.FC<DirectDownloadPromptModalProps>
   onAccept,
   onDecline
 }) => {
+  const streamSupport = getDiskStreamSupport();
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -48,7 +51,7 @@ export const DirectDownloadPromptModal: React.FC<DirectDownloadPromptModalProps>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-accent/15 border border-accent/30 text-accent text-xs font-semibold">
                 <HardDrive className="w-3.5 h-3.5" />
-                <span>Direct Download • Bypass RAM Limits</span>
+                <span>Bypass RAM • Direct Streaming</span>
               </div>
 
               <button
@@ -79,8 +82,30 @@ export const DirectDownloadPromptModal: React.FC<DirectDownloadPromptModalProps>
                 </div>
               </div>
 
+              {/* Platform Engine Status */}
+              <div className="p-3 rounded-xl bg-accent/10 border border-accent/20 flex items-start gap-2.5 text-xs text-muted leading-relaxed">
+                {streamSupport.isIOS ? (
+                  <Smartphone className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+                ) : (
+                  <Monitor className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <div className="font-semibold text-text text-xs flex items-center gap-1.5">
+                    <span>{streamSupport.label}</span>
+                    <span className="px-1.5 py-0.2 bg-accent/20 text-accent rounded text-[10px] uppercase font-bold">Active</span>
+                  </div>
+                  <div className="text-[11px] text-muted mt-0.5">
+                    {streamSupport.hasNativePicker
+                      ? "Direct streaming to selected local file. Browser RAM heap bypassed."
+                      : streamSupport.hasOPFS
+                      ? "Origin Private File System (OPFS) direct disk pipeline active. Protects iOS/mobile tabs from memory crashes."
+                      : "Memory-guarded stream active. Protected against mobile memory termination."}
+                  </div>
+                </div>
+              </div>
+
               <p className="text-xs text-muted leading-relaxed">
-                The sender is currently <strong className="text-accent">waiting for you to click download</strong> on your browser. This transfer will stream directly to your disk, bypassing browser memory and sandboxes.
+                The sender is currently <strong className="text-accent">waiting for you to accept</strong> this transfer. Click download below to initiate the direct stream.
               </p>
             </div>
 
@@ -98,13 +123,13 @@ export const DirectDownloadPromptModal: React.FC<DirectDownloadPromptModalProps>
                 className="flex-2 py-2.5 px-4 rounded-xl bg-accent hover:bg-accent/90 text-white text-xs font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>Download to Computer</span>
+                <span>{streamSupport.isIOS ? "Download to Device" : "Download to Computer"}</span>
               </button>
             </div>
 
             <div className="text-[11px] text-muted text-center flex items-center justify-center gap-1.5 pt-1">
               <ShieldCheck className="w-3.5 h-3.5 text-success" />
-              <span>Zero RAM buffering • Streamed directly via WebRTC</span>
+              <span>Zero-RAM Disk Pipeline • Anti-Crash Guard Engaged</span>
             </div>
           </motion.div>
         </motion.div>
