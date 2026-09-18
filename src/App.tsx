@@ -63,6 +63,7 @@ import { IncomingCallModal, IncomingCallData } from './components/IncomingCallMo
 import { EasterEggModal, playTapTick } from './components/EasterEggModal';
 import { NexusInfoModal } from './components/NexusInfoModal';
 import { DirectDownloadPromptModal } from './components/DirectDownloadPromptModal';
+import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { generateRandomName } from './lib/nameGenerator';
 import { createSafeDiskWriter, triggerBrowserFileDownload } from './lib/diskStreamer';
 
@@ -98,6 +99,7 @@ export default function App() {
   
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
+  const [infoModalTab, setInfoModalTab] = useState<'guide' | 'dictionary' | 'offline' | 'legal'>('guide');
   const [selectedPeerProfile, setSelectedPeerProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTabState] = useState<string>("p2p");
   const activeTabRef = useRef<string>("p2p");
@@ -2187,9 +2189,16 @@ export default function App() {
         {showInfoModal && (
           <NexusInfoModal
             isOpen={showInfoModal}
+            initialTab={infoModalTab}
             onClose={() => setShowInfoModal(false)}
           />
         )}
+        <CookieConsentBanner
+          onOpenLegal={() => {
+            setInfoModalTab('legal');
+            setShowInfoModal(true);
+          }}
+        />
         {incomingDirectPrompt && (
           <DirectDownloadPromptModal
             isOpen={!!incomingDirectPrompt}
@@ -2318,10 +2327,13 @@ export default function App() {
 
           {/* Light button (INFO) icon beside the profile icon */}
           <button
-            onClick={() => setShowInfoModal(true)}
+            onClick={() => {
+              setInfoModalTab('guide');
+              setShowInfoModal(true);
+            }}
             className="w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 flex items-center justify-center text-sky-500 dark:text-sky-400 hover:text-sky-600 dark:hover:text-sky-300 transition-all border border-sky-500/30 dark:border-sky-400/30 bg-sky-500/10 dark:bg-sky-400/10 hover:bg-sky-500/20 dark:hover:bg-sky-400/20 backdrop-blur rounded-xl lg:rounded-2xl shadow-sm hover:scale-105 cursor-pointer flex-shrink-0"
-            title="App Manual & Connection Guide (Info)"
-            aria-label="App Manual and Connection Guide"
+            title="App Manual, Connection Guide & Legal / Privacy Hub (Info)"
+            aria-label="App Manual, Connection Guide and Legal & Privacy Hub"
           >
             <Info className="w-4 h-4 lg:w-5 lg:h-5" />
           </button>

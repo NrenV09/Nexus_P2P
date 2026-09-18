@@ -31,10 +31,12 @@ import {
   BookOpen
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { LegalComplianceView } from './LegalComplianceView';
 
 interface NexusInfoModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: 'guide' | 'dictionary' | 'offline' | 'legal';
 }
 
 interface FeatureDoc {
@@ -235,12 +237,42 @@ const FEATURE_DOCS: FeatureDoc[] = [
     summary: 'Fully functional on local WiFi, phone hotspots, or air-gapped networks.',
     description: 'The app contains zero external CDN scripts, web fonts, or server dependencies. All assets are compiled directly into the standalone HTML file. WebRTC generates local host candidates for direct device-to-device communication on any local network.',
     howToUse: 'Connect two devices to the same local WiFi or mobile hotspot (even with mobile data disabled) and exchange QR codes or tokens to transfer files completely offline.'
+  },
+  {
+    id: 'cache_storage_sandbox',
+    name: 'CacheStorage Disk Persistence (app-cache-v1)',
+    category: 'transfer',
+    icon: HardDrive,
+    badge: 'Zero RAM Limits',
+    summary: 'Persists drop zone files directly to native browser disk cache.',
+    description: 'Uses the browser CacheStorage API to store and read file payloads directly from the user disk rather than holding them in volatile RAM. Files remain intact across page reloads and browser restarts.',
+    howToUse: 'Drop or select files into the File Drop Zone sandbox. Files are automatically committed to CacheStorage with a "Cached" badge and live megabyte disk counter.'
+  },
+  {
+    id: 'clear_cache_purge',
+    name: 'Clear Cache & Disk Purge Button',
+    category: 'transfer',
+    icon: Trash2,
+    badge: 'Disk Cleanup',
+    summary: 'Instantly purges all cached sandbox files and frees up browser disk space.',
+    description: 'Wipes the app-cache-v1 CacheStorage bucket, removes metadata indexes from localStorage, and clears all in-memory file buffers with a single click.',
+    howToUse: 'Click the "Clear Cache" button located in the header of the File Drop Zone sandbox.'
+  },
+  {
+    id: 'legal_compliance_hub',
+    name: 'Legal, Privacy & Compliance Hub',
+    category: 'system',
+    icon: ShieldCheck,
+    badge: '14-Point Verified',
+    summary: 'Complete privacy policy, terms of service, zero-cookie disclosures, and accessibility audits.',
+    description: 'Comprehensive documentation covering GDPR/CCPA compliance, zero telemetry guarantees, acceptable use terms, WCAG 2.1 AA accessibility standards, and cryptographic export compliance.',
+    howToUse: 'Click the (i) button in the header, then switch to the "Legal, Privacy & Compliance Hub" tab to inspect any policy or customize storage consent.'
   }
 ];
 
-export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({ isOpen, onClose }) => {
+export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({ isOpen, onClose, initialTab = 'guide' }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'guide' | 'dictionary' | 'offline'>('guide');
+  const [activeTab, setActiveTab] = useState<'guide' | 'dictionary' | 'offline' | 'legal'>(initialTab);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   const filteredDocs = FEATURE_DOCS.filter(doc => {
@@ -330,7 +362,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({ isOpen, onClose 
               <button
                 onClick={() => setActiveTab('offline')}
                 className={cn(
-                  "px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer",
+                  "px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap",
                   activeTab === 'offline' 
                     ? "bg-accent text-white shadow-sm" 
                     : "text-muted hover:text-text hover:bg-white/10"
@@ -338,6 +370,23 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({ isOpen, onClose 
               >
                 <WifiOff className="w-3.5 h-3.5" />
                 <span>100% Offline & Direct Disk Stream</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('legal')}
+                className={cn(
+                  "px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap",
+                  activeTab === 'legal' 
+                    ? "bg-emerald-600 text-white shadow-sm" 
+                    : "text-muted hover:text-text hover:bg-white/10"
+                )}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Legal, Privacy & Compliance Hub</span>
+                <span className={cn(
+                  "text-[10px] font-mono px-1.5 py-0.5 rounded font-bold",
+                  activeTab === 'legal' ? "bg-white/20 text-white" : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25"
+                )}>14/14</span>
               </button>
             </div>
 
@@ -557,6 +606,11 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({ isOpen, onClose 
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* TAB 4: LEGAL, PRIVACY & COMPLIANCE HUB */}
+              {activeTab === 'legal' && (
+                <LegalComplianceView />
               )}
 
             </div>
