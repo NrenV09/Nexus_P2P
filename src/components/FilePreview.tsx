@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Download, X, GripHorizontal, RefreshCw, Share, Link as LinkIcon, Check } from 'lucide-react';
 import { formatBytes } from '../lib/utils';
 import { FilePayload } from '../types';
+import { getOrStoreCache } from '../lib/cacheStorage';
 
 interface FilePreviewProps {
   file: FilePayload | null;
@@ -17,13 +18,41 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (file && file.blob) {
-      const objectUrl = URL.createObjectURL(file.blob);
-      setUrl(objectUrl);
-      return () => URL.revokeObjectURL(objectUrl);
+    let active = true;
+    let createdUrl: string | null = null;
+
+    if (file) {
+      if (file.cacheUrl) {
+        getOrStoreCache(file.cacheUrl, file.mimeType || file.blob?.type || 'application/octet-stream')
+          .then(blobUrl => {
+            if (active) {
+              createdUrl = blobUrl;
+              setUrl(blobUrl);
+            }
+          })
+          .catch(err => {
+            console.warn("getOrStoreCache preview fallback to blob:", err);
+            if (active && file.blob) {
+              const objectUrl = URL.createObjectURL(file.blob);
+              createdUrl = objectUrl;
+              setUrl(objectUrl);
+            }
+          });
+      } else if (file.blob) {
+        const objectUrl = URL.createObjectURL(file.blob);
+        createdUrl = objectUrl;
+        setUrl(objectUrl);
+      }
     } else {
       setUrl(null);
     }
+
+    return () => {
+      active = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
   }, [file]);
 
   const handleGenerateBlobLink = () => {

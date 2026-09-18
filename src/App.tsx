@@ -22,7 +22,8 @@ import {
   PhoneCall,
   Maximize2,
   Info,
-  HardDrive
+  HardDrive,
+  Trash2
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -36,6 +37,15 @@ import {
   LogEntry,
   UserProfile
 } from './types';
+
+import { 
+  getOrStoreCache, 
+  deleteCachedFile, 
+  clearAllCache, 
+  getCacheSizeMB, 
+  storeFileInSandboxCache, 
+  getCachedBlob 
+} from './lib/cacheStorage';
 
 import { QRScanner } from './components/QRScanner';
 import { QRUtilityNode } from './components/QRUtilityNode';
@@ -155,6 +165,43 @@ export default function App() {
     }
   }, []);
   const [files, setFiles] = useState<FilePayload[]>([]);
+  const [cacheSizeMB, setCacheSizeMB] = useState<number>(0);
+
+  // Rehydrate sandbox files from CacheStorage / persistent storage on mount
+  useEffect(() => {
+    let active = true;
+    const initSandbox = async () => {
+      try {
+        const size = await getCacheSizeMB();
+        if (active) setCacheSizeMB(size);
+
+        const saved = localStorage.getItem('nexus_sandbox_files');
+        if (saved) {
+          const list: any[] = JSON.parse(saved);
+          const loaded: FilePayload[] = [];
+          for (const item of list) {
+            let blob: Blob | undefined;
+            if (item.cacheUrl) {
+              blob = (await getCachedBlob(item.cacheUrl)) || undefined;
+            }
+            loaded.push({
+              ...item,
+              timestamp: new Date(item.timestamp),
+              blob
+            });
+          }
+          if (active && loaded.length > 0) {
+            setFiles(loaded);
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to initialize sandbox from cache:", e);
+      }
+    };
+    initSandbox();
+    return () => { active = false; };
+  }, []);
+
   const [transfer, setTransfer] = useState<TransferProgress | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   
@@ -329,6 +376,32 @@ export default function App() {
 
   const [bandwidthOptimized, setBandwidthOptimized] = useState(false);
 
+  const handleDeleteSandboxFile = useCallback(async (file: FilePayload, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      if (file.cacheUrl) {
+        await deleteCachedFile(file.cacheUrl);
+      }
+      setFiles(prev => {
+        const next = prev.filter(f => f.id !== file.id);
+        try {
+          localStorage.setItem('nexus_sandbox_files', JSON.stringify(
+            next.map(({ blob: _, ...rest }) => rest)
+          ));
+        } catch (_) {}
+        return next;
+      });
+      if (selectedFile?.id === file.id) {
+        setSelectedFile(null);
+      }
+      const mb = await getCacheSizeMB();
+      setCacheSizeMB(mb);
+      addLog(`Deleted ${file.name} from cache (disk space freed)`, "ok");
+    } catch (err: any) {
+      addLog(`Failed to delete file from cache: ${err?.message || err}`, "err");
+    }
+  }, [selectedFile, addLog]);
+
   const handleClearCache = useCallback(async () => {
     try {
       fileBuffers.current.forEach(async (buffer) => {
@@ -339,6 +412,9 @@ export default function App() {
       fileBuffers.current.clear();
       chatChunkBuffers.current = {};
       setTransfer(null);
+
+      // Purge entire app-cache-v1 bucket using CacheStorage API
+      await clearAllCache();
 
       if (window.caches) {
         const cacheKeys = await caches.keys();
@@ -362,7 +438,16 @@ export default function App() {
         } catch(e) {}
       }
 
-      addLog("App cache cleared: In-memory buffers and temp storage purged", "ok");
+      setFiles([]);
+      setSelectedFile(null);
+      try {
+        localStorage.removeItem('nexus_sandbox_files');
+      } catch (_) {}
+
+      const size = await getCacheSizeMB();
+      setCacheSizeMB(size);
+
+      addLog("App cache cleared: Entire cache bucket (app-cache-v1) and sandbox files purged from disk", "ok");
     } catch (e: any) {
       addLog("Failed to clear cache: " + (e?.message || e), "err");
     }
@@ -1229,20 +1314,56 @@ export default function App() {
       const senderColor = buffer.metadata.senderColor || "bg-muted";
       const senderId = buffer.metadata.senderId;
       const isDirectDisk = buffer.isDirectDisk;
+      const mimeType = buffer.metadata.mimeType || 'application/octet-stream';
+      const finalBlob = blob || new Blob([], { type: mimeType });
       
       // Bypass RAM / Direct disk downloads do NOT sandbox the file in the file drop zone!
       if (!isDirectDisk) {
-        setFiles(prev => [{
-          id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
+        const fileId = (Math.random().toString(36).substring(2) + Date.now().toString(36));
+        storeFileInSandboxCache(
+          fileId,
           name,
-          blob: blob || new Blob([], { type: buffer.metadata.mimeType || 'application/octet-stream' }),
-          size,
-          senderName,
-          senderColor,
-          senderId,
-          timestamp: new Date(),
-          direction: 'in'
-        }, ...prev]);
+          finalBlob,
+          mimeType,
+          { senderName, senderId: senderId || '', direction: 'in' }
+        ).then(({ cacheUrl }) => {
+          setFiles(prev => {
+            const next: FilePayload[] = [{
+              id: fileId,
+              name,
+              blob: finalBlob,
+              size,
+              senderName,
+              senderColor,
+              senderId,
+              timestamp: new Date(),
+              direction: 'in',
+              cacheUrl,
+              mimeType
+            }, ...prev];
+            try {
+              localStorage.setItem('nexus_sandbox_files', JSON.stringify(
+                next.map(({ blob: _, ...rest }) => rest)
+              ));
+            } catch (_) {}
+            return next;
+          });
+          getCacheSizeMB().then(setCacheSizeMB);
+        }).catch(err => {
+          console.warn("Failed to cache incoming sandbox file:", err);
+          setFiles(prev => [{
+            id: fileId,
+            name,
+            blob: finalBlob,
+            size,
+            senderName,
+            senderColor,
+            senderId,
+            timestamp: new Date(),
+            direction: 'in',
+            mimeType
+          }, ...prev]);
+        });
       }
       
       setMessages(prev => [...prev, {
@@ -1905,15 +2026,51 @@ export default function App() {
 
     // Bypass RAM / Direct Downloads: Do not sandbox the file in the drop zone
     if (!isDirect) {
-      setFiles(prev => [{
-        id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
-        name: file.name,
-        size: file.size,
-        senderName: profile.username,
-        senderColor: profile.avatarColor,
-        timestamp: new Date(),
-        direction: 'out'
-      }, ...prev]);
+      const fileId = (Math.random().toString(36).substring(2) + Date.now().toString(36));
+      const mimeType = file.type || 'application/octet-stream';
+
+      storeFileInSandboxCache(
+        fileId,
+        file.name,
+        file,
+        mimeType,
+        { senderName: profile.username, direction: 'out' }
+      ).then(({ cacheUrl }) => {
+        setFiles(prev => {
+          const next: FilePayload[] = [{
+            id: fileId,
+            name: file.name,
+            blob: file,
+            size: file.size,
+            senderName: profile.username,
+            senderColor: profile.avatarColor,
+            timestamp: new Date(),
+            direction: 'out',
+            cacheUrl,
+            mimeType
+          }, ...prev];
+          try {
+            localStorage.setItem('nexus_sandbox_files', JSON.stringify(
+              next.map(({ blob: _, ...rest }) => rest)
+            ));
+          } catch (_) {}
+          return next;
+        });
+        getCacheSizeMB().then(setCacheSizeMB);
+      }).catch(err => {
+        console.warn("Failed to cache outgoing sandbox file:", err);
+        setFiles(prev => [{
+          id: fileId,
+          name: file.name,
+          blob: file,
+          size: file.size,
+          senderName: profile.username,
+          senderColor: profile.avatarColor,
+          timestamp: new Date(),
+          direction: 'out',
+          mimeType
+        }, ...prev]);
+      });
     }
 
     const peerTarget = dataChannels.current.size === 1 ? (Object.values(peerProfiles) as any[])[0]?.username || 'Peer' : 'Group';
@@ -2539,9 +2696,23 @@ export default function App() {
 
                     <div className="flex-1 p-5 overflow-hidden flex flex-col">
                       <div className="flex flex-wrap items-center justify-between mb-2 gap-2">
-                        <button onClick={handleClearCache} className="px-3 py-1 rounded bg-white/20 dark:bg-white/5 border border-white/30 dark:border-white/10 hover:bg-white/30 dark:hover:bg-white/10 transition-colors text-text shadow-sm cursor-pointer text-xs font-medium">
-                          Clear App Caches
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={handleClearCache} 
+                            className="px-3 py-1.5 rounded-xl bg-white/20 dark:bg-white/5 border border-white/30 dark:border-white/10 hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-500 transition-colors text-text shadow-sm cursor-pointer text-xs font-medium flex items-center gap-1.5"
+                            title="Purge entire app-cache-v1 bucket and all sandbox files from disk"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Clear Cache</span>
+                          </button>
+                          <div 
+                            className="text-[11px] font-mono text-muted bg-white/20 dark:bg-white/5 border border-white/20 dark:border-white/10 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm"
+                            title="Disk storage used by cached files in app-cache-v1"
+                          >
+                            <HardDrive className="w-3.5 h-3.5 text-accent" />
+                            <span>Cache: <strong className="text-text font-semibold">{cacheSizeMB} MB</strong></span>
+                          </div>
+                        </div>
                         <div className="flex flex-wrap items-center gap-2.5">
                           <button
                             type="button"
@@ -2600,30 +2771,64 @@ export default function App() {
                           <PacketTransferAnimation transfer={transfer} myUsername={profile.username} onCancel={handleCancelTransfer} />
                         )}
 
-                        {files.map((file, idx) => (
+                        {files.map((file) => (
                           <div 
                             key={file.id}
-                            onClick={() => file.blob ? setSelectedFile(file) : null}
+                            onClick={async () => {
+                              if (file.blob) {
+                                setSelectedFile(file);
+                              } else if (file.cacheUrl) {
+                                const b = await getCachedBlob(file.cacheUrl);
+                                if (b) {
+                                  setSelectedFile({ ...file, blob: b });
+                                } else {
+                                  try {
+                                    const bUrl = await getOrStoreCache(file.cacheUrl, file.mimeType || 'application/octet-stream');
+                                    const res = await fetch(bUrl);
+                                    const fetchedBlob = await res.blob();
+                                    setSelectedFile({ ...file, blob: fetchedBlob });
+                                  } catch (err) {
+                                    addLog(`Could not load cached file: ${file.name}`, "err");
+                                  }
+                                }
+                              }
+                            }}
                             className={cn(
-                              "bg-white/40 dark:bg-transparent border p-4 rounded-2xl flex items-center gap-4 transition-all shadow-sm",
-                              file.blob ? "cursor-pointer hover:bg-white/60 dark:hover:bg-black/5 hover:shadow-md border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent " : "border-white/30 dark:border-transparent dark:border-white/10 dark:border-transparent opacity-70"
+                              "bg-white/40 dark:bg-transparent border p-4 rounded-2xl flex items-center justify-between gap-4 transition-all shadow-sm group",
+                              "cursor-pointer hover:bg-white/60 dark:hover:bg-white/5 hover:shadow-md border-white/60 dark:border-white/10"
                             )}
                           >
-                            <div className={cn(
-                              "w-10 h-10 rounded-xl bg-white dark:bg-transparent flex items-center justify-center shadow-sm shrink-0",
-                              file.direction === 'in' ? "text-success" : "text-accent"
-                            )}>
-                              {file.direction === 'in' ? <Download className="w-5 h-5" /> : <Send className="w-5 h-5" />}
-                            </div>
-                            <div className={cn(
-                              "flex-1 min-w-0 transition-colors",
-                              file.direction === 'in' ? "text-text" : "text-text"
-                            )}>
-                              <div className="text-sm font-semibold truncate">{file.name}</div>
-                              <div className="text-xs text-muted mt-0.5">
-                                {formatBytes(file.size)} • {file.direction === 'in' ? `From: ${file.senderName}` : "Sent by you"}
+                            <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                              <div className={cn(
+                                "w-10 h-10 rounded-xl bg-white dark:bg-white/5 flex items-center justify-center shadow-sm shrink-0 border border-black/5 dark:border-white/5",
+                                file.direction === 'in' ? "text-success" : "text-accent"
+                              )}>
+                                {file.direction === 'in' ? <Download className="w-5 h-5" /> : <Send className="w-5 h-5" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-semibold truncate text-text flex items-center gap-2">
+                                  <span>{file.name}</span>
+                                  {file.cacheUrl && (
+                                    <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">
+                                      Cached
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted mt-0.5 flex items-center gap-2">
+                                  <span>{formatBytes(file.size)}</span>
+                                  <span>•</span>
+                                  <span>{file.direction === 'in' ? `From: ${file.senderName}` : "Sent by you"}</span>
+                                </div>
                               </div>
                             </div>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteSandboxFile(file, e)}
+                              className="p-2 rounded-xl text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-60 group-hover:opacity-100 cursor-pointer shrink-0"
+                              title="Delete cached file from disk"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         ))}
 

@@ -22,6 +22,8 @@ export interface FilePayload {
   senderId?: string;
   timestamp: Date;
   direction: 'in' | 'out';
+  cacheUrl?: string;
+  mimeType?: string;
 }
 
 export interface TransferProgress {
