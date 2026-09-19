@@ -848,7 +848,8 @@ export default function App() {
             <RefreshCw className={cn("w-4 h-4 lg:w-5 lg:h-5", isSimulation && "animate-spin")} />
           </button>
           <div className="min-w-0">
-            <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap">
+            <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap flex items-center gap-2">
+              <img src="/icon.svg" alt="Quantum Link" className="w-5 h-5 md:w-6 md:h-6 rounded-md inline-block flex-shrink-0 shadow-sm" />
               <span className="hidden sm:inline">Quantum Link</span>
               <span className="sm:hidden">Q-Link</span>
               <span className="text-[10px] lg:text-xs text-muted font-normal ml-1 lg:ml-2">v7.8.4</span>

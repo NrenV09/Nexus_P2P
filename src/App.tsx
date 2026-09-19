@@ -2327,7 +2327,8 @@ export default function App() {
               animate={titleTapCount > 0 ? { scale: [1, 0.95, 1] } : {}}
               transition={{ duration: 0.12 }}
             >
-              <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap flex items-center gap-1.5">
+              <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap flex items-center gap-2">
+                <img src="/icon.svg" alt="Quantum Link" className="w-5 h-5 md:w-6 md:h-6 rounded-md inline-block flex-shrink-0 shadow-sm" />
                 <span className="hidden sm:inline">Quantum Link</span>
                 <span className="sm:hidden">Q-Link</span>
                 <span className="text-[10px] lg:text-xs text-muted font-normal">v7.8.4</span>
