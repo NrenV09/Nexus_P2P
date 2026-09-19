@@ -90,47 +90,47 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
       className="fixed inset-0 z-50 bg-bg/95 backdrop-blur-xl flex flex-col p-4 md:p-12 overflow-hidden"
     >
       {/* Header */}
-      <div className="flex flex-col bg-surface border border-border p-4 shadow-xl flex-shrink-0 gap-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div className="flex flex-col w-full sm:w-auto">
-            <span className="text-[12px] font-bold text-accent uppercase tracking-widest truncate sm:max-w-md">
+      <div className="flex flex-col bg-surface border border-border/80 rounded-2xl p-4 shadow-xl flex-shrink-0 gap-3">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div className="flex flex-col w-full sm:w-auto min-w-0">
+            <span className="text-sm font-semibold text-text truncate sm:max-w-md">
               {file.name}
             </span>
-            <span className="text-[10px] text-muted tracking-wide">
-              {file.blob?.type || "Unknown Type"} • Drag image/asset to extract
+            <span className="text-xs text-muted">
+              {file.blob?.type || "File"} • {formatBytes(file.size)}
             </span>
           </div>
 
           <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-end">
             {navigator.share && file.blob && (
-                <button 
-                  onClick={handleShare}
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500 text-blue-500 text-[10px] font-bold uppercase transition-colors hover:bg-blue-500/20"
-                >
-                  <Share className="w-4 h-4" /> Share
-                </button>
+              <button 
+                onClick={handleShare}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-500 text-xs font-semibold transition-colors hover:bg-blue-500/20 cursor-pointer"
+              >
+                <Share className="w-3.5 h-3.5" /> Share
+              </button>
             )}
             <button 
               onClick={handleGenerateBlobLink}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-accent/10 border border-accent text-accent text-[10px] font-bold uppercase transition-colors hover:bg-accent/20"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-accent/10 border border-accent/30 text-accent text-xs font-semibold transition-colors hover:bg-accent/20 cursor-pointer"
             >
-              {isGeneratingURI ? <RefreshCw className="w-4 h-4 animate-spin" /> : <LinkIcon className="w-4 h-4" />}
+              {isGeneratingURI ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <LinkIcon className="w-3.5 h-3.5" />}
               Extract Link
             </button>
             {url && (
               <a 
                 href={url} 
                 download={file.name}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-success/10 border border-success text-success text-[10px] font-bold uppercase transition-colors hover:bg-success/20"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 text-xs font-semibold transition-colors hover:bg-emerald-500/20 cursor-pointer"
               >
-                <Download className="w-4 h-4" /> Download
+                <Download className="w-3.5 h-3.5" /> Download
               </a>
             )}
             <button 
               onClick={onClose}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500 text-red-500 text-[10px] font-bold uppercase transition-colors hover:bg-red-500/20"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500 text-xs font-semibold transition-colors hover:bg-red-500/20 cursor-pointer"
             >
-              <X className="w-4 h-4" /> Close
+              <X className="w-3.5 h-3.5" /> Close
             </button>
           </div>
         </div>
@@ -142,13 +142,13 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
                 initial={{ opacity: 0, height: 0 }} 
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="w-full flex gap-2 pt-2 border-t border-border mt-2"
+                className="w-full flex gap-2 pt-2 border-t border-border/60 mt-1"
              >
                 <textarea 
                   readOnly 
                   value={dataUri} 
                   onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-                  className="flex-1 bg-black/50 border border-border p-2 text-[10px] font-mono text-muted rounded min-w-0 resize-none h-12 scrollbar-hide break-all" 
+                  className="flex-1 bg-black/40 border border-border/80 p-2 text-xs font-mono text-muted rounded-xl min-w-0 resize-none h-12 scrollbar-hide break-all" 
                   placeholder="Blob URL..."
                 />
                 <button 
@@ -174,9 +174,9 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
                      setCopied(true);
                      setTimeout(() => setCopied(false), 2000);
                   }}
-                  className="px-4 py-2 bg-surface-brighter border border-border text-[10px] font-bold uppercase text-white hover:bg-white/10 transition-colors flex items-center gap-2"
+                  className="px-3.5 py-1.5 bg-surface-brighter border border-border/80 rounded-xl text-xs font-semibold text-text hover:bg-white/10 transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
-                  {copied ? <Check className="w-3 h-3 text-success" /> : <LinkIcon className="w-3 h-3" />}
+                  {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <LinkIcon className="w-3.5 h-3.5" />}
                   {copied ? "Copied" : "Copy"}
                 </button>
              </motion.div>
@@ -185,7 +185,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden mt-4 border border-border bg-surface-brighter flex items-center justify-center relative p-4 md:p-8">
+      <div className="flex-1 overflow-hidden mt-3 border border-border/80 rounded-2xl bg-surface-brighter flex items-center justify-center relative p-4 md:p-8">
         {!url ? (
           <div className="text-muted flex items-center gap-3 animate-pulse">
             <RefreshCw className="w-5 h-5 animate-spin" />
