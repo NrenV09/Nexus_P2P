@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, Users, Send, Video, Phone, Mic, Square, Trash2, AlertCircle, X, Gauge } from 'lucide-react';
+import { Shield, Users, Send, Video, Phone, Mic, Square, Trash2, AlertCircle, X, Gauge, MonitorUp } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ChatMessage, NodeRole } from '../types';
 import { VoiceMessagePlayer } from './VoiceMessagePlayer';
@@ -11,7 +11,7 @@ interface SecureChatNodeProps {
   connectedPeers: number;
   role: NodeRole;
   onClickProfile?: (senderId: string) => void;
-  startCall?: (type: 'audio' | 'video') => void;
+  startCall?: (type: 'audio' | 'video' | 'screen') => void;
   bandwidthOptimized?: boolean;
   onToggleBandwidthOptimized?: () => void;
   isCallActive?: boolean;
@@ -317,6 +317,15 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
               >
                 <Video className="w-3.5 h-3.5 text-accent group-hover:text-white" />
                 <span className="hidden sm:inline text-[11px]">Group Video</span>
+              </button>
+
+              <button 
+                onClick={() => startCall?.('screen')} 
+                className="px-2 py-1 rounded-xl bg-white/40 dark:bg-white/10 hover:bg-blue-600 hover:text-white transition-all text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs border border-white/20 active:scale-95"
+                title="Direct Screen Mirror / Broadcast to Peers"
+              >
+                <MonitorUp className="w-3.5 h-3.5 text-blue-500 group-hover:text-white" />
+                <span className="hidden sm:inline text-[11px]">Mirror Screen</span>
               </button>
 
               <button 

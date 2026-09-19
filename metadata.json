@@ -1,6 +1,6 @@
 {
   "name": "Quantum Link",
   "description": "Secure P2P file transfer and encrypted communication suite with QR-based handshaking.",
-  "requestFramePermissions": ["camera", "microphone"],
+  "requestFramePermissions": ["camera", "microphone", "display-capture"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

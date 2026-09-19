@@ -1,13 +1,13 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { X, User, Calendar, Info, Phone, Video } from 'lucide-react';
+import { X, User, Calendar, Info, Phone, Video, MonitorUp } from 'lucide-react';
 import { UserProfile } from '../types';
 import { cn } from '../lib/utils';
 
 interface ViewProfileModalProps {
   profile: UserProfile;
   onClose: () => void;
-  onStartCall?: (type: 'audio' | 'video') => void;
+  onStartCall?: (type: 'audio' | 'video' | 'screen') => void;
 }
 
 export function ViewProfileModal({ profile, onClose, onStartCall }: ViewProfileModalProps) {
@@ -76,22 +76,30 @@ export function ViewProfileModal({ profile, onClose, onStartCall }: ViewProfileM
           </div>
         </div>
 
-        <div className="p-4 bg-zinc-50/50 dark:bg-zinc-800/20 border-t border-gray-100 dark:border-white/5 flex gap-2">
+        <div className="p-4 bg-zinc-50/50 dark:bg-zinc-800/20 border-t border-gray-100 dark:border-white/5 flex flex-wrap gap-2">
           {onStartCall && (
             <>
               <button 
                 onClick={() => { onClose(); onStartCall('audio'); }}
-                className="flex-1 px-4 py-2.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                className="flex-1 min-w-[90px] px-3 py-2.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
               >
-                <Phone className="w-4 h-4" />
-                Voice Call
+                <Phone className="w-3.5 h-3.5" />
+                Voice
               </button>
               <button 
                 onClick={() => { onClose(); onStartCall('video'); }}
-                className="flex-1 px-4 py-2.5 text-xs font-semibold bg-accent hover:bg-accent/90 text-white rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                className="flex-1 min-w-[90px] px-3 py-2.5 text-xs font-semibold bg-accent hover:bg-accent/90 text-white rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
               >
-                <Video className="w-4 h-4" />
-                Video Call
+                <Video className="w-3.5 h-3.5" />
+                Video
+              </button>
+              <button 
+                onClick={() => { onClose(); onStartCall('screen'); }}
+                className="flex-1 min-w-[110px] px-3 py-2.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                title="Mirror your screen directly to this peer"
+              >
+                <MonitorUp className="w-3.5 h-3.5" />
+                Mirror Screen
               </button>
             </>
           )}

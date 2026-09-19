@@ -1,12 +1,13 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Phone, PhoneOff, Video, Users } from 'lucide-react';
+import { Phone, PhoneOff, Video, Users, MonitorUp } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export interface IncomingCallData {
   peerId: string;
   callerName: string;
   callType: 'audio' | 'video';
+  isScreenMirror?: boolean;
   sdp: RTCSessionDescriptionInit;
 }
 
@@ -23,7 +24,8 @@ export function IncomingCallModal({
 }: IncomingCallModalProps) {
   if (!incomingCall) return null;
 
-  const isVideo = incomingCall.callType === 'video';
+  const isScreen = Boolean(incomingCall.isScreenMirror);
+  const isVideo = incomingCall.callType === 'video' || isScreen;
 
   return (
     <AnimatePresence>
@@ -51,7 +53,7 @@ export function IncomingCallModal({
               {incomingCall.callerName.substring(0, 2)}
             </div>
             <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[#1a73e8] flex items-center justify-center text-white border-2 border-[#202124] z-20">
-              {isVideo ? <Video className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />}
+              {isScreen ? <MonitorUp className="w-3.5 h-3.5" /> : isVideo ? <Video className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />}
             </div>
           </div>
 
@@ -60,11 +62,19 @@ export function IncomingCallModal({
             {incomingCall.callerName}
           </h3>
           <p className="text-sm text-white/70 mb-6 flex items-center gap-1.5 font-medium">
-            <span>Incoming {isVideo ? 'Google Meet Video Call' : 'Secure Voice Call'}</span>
+            <span>
+              {isScreen 
+                ? 'Incoming Screen Mirror Broadcast' 
+                : isVideo 
+                  ? 'Incoming Video Call' 
+                  : 'Incoming Voice Call'}
+            </span>
           </p>
 
           <p className="text-xs text-white/50 mb-8 max-w-[240px]">
-            End-to-end encrypted direct peer connection over Quantum Link matrix.
+            {isScreen 
+              ? 'Real-time peer-to-peer screen mirroring over Quantum Link.' 
+              : 'End-to-end encrypted direct peer connection over Quantum Link matrix.'}
           </p>
 
           {/* Action Buttons */}
@@ -86,11 +96,13 @@ export function IncomingCallModal({
               <button
                 onClick={() => onAccept(incomingCall)}
                 className="w-14 h-14 rounded-full bg-[#34a853] hover:bg-[#2d9249] text-white flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer"
-                title="Accept"
+                title={isScreen ? "Watch Screen" : "Accept Call"}
               >
-                {isVideo ? <Video className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
+                {isScreen ? <MonitorUp className="w-6 h-6" /> : isVideo ? <Video className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
               </button>
-              <span className="text-[11px] text-white/60 font-medium">Join Call</span>
+              <span className="text-[11px] text-white/60 font-medium">
+                {isScreen ? "Watch Screen" : "Join Call"}
+              </span>
             </div>
           </div>
         </motion.div>

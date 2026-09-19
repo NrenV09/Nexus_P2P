@@ -1093,11 +1093,12 @@ export default function App() {
             setIncomingDirectPrompt(null);
             fileBuffers.current.delete(peerId);
           } else if (data.type === 'call-invite') {
-            addLog(`Incoming ${data.callType} call from ${data.callerName || 'peer'}`, "info");
+            addLog(data.isScreenMirror ? `Incoming screen broadcast from ${data.callerName || 'peer'}` : `Incoming ${data.callType} call from ${data.callerName || 'peer'}`, "info");
             setIncomingCall({
               peerId,
               callerName: data.callerName || 'Peer',
               callType: data.callType || 'video',
+              isScreenMirror: data.isScreenMirror,
               sdp: data.sdp
             });
             playRingChime();
@@ -1130,6 +1131,8 @@ export default function App() {
                 ...prev,
                 [peerId]: { ...prev[peerId], video: true }
               }));
+              setIsCallActive(true);
+              setIsCallMinimized(false);
               addLog(`${data.username || 'Peer'} started sharing their screen`, "ok");
             } else {
               setScreenSharingPeers(prev => {
@@ -1547,25 +1550,69 @@ export default function App() {
   };
 
   const createSimStream = (label: string, color: string, withAudio: boolean = true) => {
+    const isScreen = label.toLowerCase().includes('screen') || label.toLowerCase().includes('mirror') || label.toLowerCase().includes('display');
     const canvas = document.createElement('canvas');
-    canvas.width = 640; 
-    canvas.height = 480;
+    canvas.width = isScreen ? 1280 : 640; 
+    canvas.height = isScreen ? 720 : 480;
     const ctx = canvas.getContext('2d');
     let frame = 0;
     const timer = setInterval(() => {
       if (!ctx) return;
       frame++;
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(0, 0, 640, 480);
-      ctx.fillStyle = color;
-      ctx.font = 'bold 24px monospace';
-      ctx.fillText(label, 160, 220);
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '16px monospace';
-      ctx.fillText(new Date().toLocaleTimeString(), 250, 260);
-      const pulse = Math.sin(frame / 6) * 30;
-      ctx.fillStyle = color;
-      ctx.fillRect(190, 290, 260 + pulse, 6);
+      if (isScreen) {
+        // High-fidelity Simulated Desktop Display
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(0, 0, 1280, 720);
+        // Top system bar
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0, 0, 1280, 36);
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('QUANTUM OS - DIRECT SCREEN MIRROR', 20, 23);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px monospace';
+        ctx.fillText(new Date().toLocaleTimeString(), 1180, 23);
+        // Simulated application window
+        ctx.fillStyle = '#111827';
+        ctx.beginPath();
+        ctx.roundRect(140, 75, 1000, 570, 16);
+        ctx.fill();
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Window title bar
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.roundRect(140, 75, 1000, 48, [16, 16, 0, 0]);
+        ctx.fill();
+        // Window dots
+        ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(170, 99, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#eab308'; ctx.beginPath(); ctx.arc(190, 99, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(210, 99, 6, 0, Math.PI * 2); ctx.fill();
+        // Window text
+        ctx.fillStyle = color;
+        ctx.font = 'bold 28px monospace';
+        ctx.fillText(label, 280, 300);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '16px monospace';
+        ctx.fillText(`Frame #${frame} | Realtime P2P Tunnel | 60 FPS | Aspect 16:9`, 280, 350);
+        // Animated activity bar
+        const pulse = Math.sin(frame / 5) * 80;
+        ctx.fillStyle = color;
+        ctx.fillRect(280, 390, 450 + pulse, 8);
+      } else {
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, 640, 480);
+        ctx.fillStyle = color;
+        ctx.font = 'bold 24px monospace';
+        ctx.fillText(label, 160, 220);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '16px monospace';
+        ctx.fillText(new Date().toLocaleTimeString(), 250, 260);
+        const pulse = Math.sin(frame / 6) * 30;
+        ctx.fillStyle = color;
+        ctx.fillRect(190, 290, 260 + pulse, 6);
+      }
     }, 100);
     const s = (canvas as any).captureStream(30);
     (s as any)._simTimer = timer;
@@ -1592,22 +1639,37 @@ export default function App() {
     return s;
   };
 
-  const startCall = async (type: 'audio' | 'video') => {
+  const startCall = async (type: 'audio' | 'video' | 'screen') => {
     let stream: MediaStream;
     const isRestricted = bandwidthOptimized || connectedCount >= 3;
-    const videoConstraint = type === 'video' 
+    const isScreen = type === 'screen';
+    const videoConstraint = (type === 'video' || isScreen)
       ? (isRestricted ? { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { max: 15 } } : true)
       : false;
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: videoConstraint
-      });
-    } catch (e) {
-      if (isSimulation) {
-        addLog("Permission denied or preview mode, using simulated live stream", "info");
-        stream = createSimStream('SIMULATED LOCAL STREAM', '#38bdf8', true);
+      if (isScreen) {
+        if (!navigator.mediaDevices?.getDisplayMedia) {
+          throw new Error("Display capture not supported");
+        }
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false
+        });
+        const vTrack = stream.getVideoTracks()[0];
+        if (vTrack) {
+          (vTrack as any).contentHint = 'detail';
+        }
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: videoConstraint
+        });
+      }
+    } catch (e: any) {
+      if (isSimulation || isScreen) {
+        addLog(isScreen ? "Screen capture preview: generating simulated screen mirror stream" : "Permission denied or preview mode, using simulated live stream", "info");
+        stream = createSimStream(isScreen ? 'MIRRORED DISPLAY 1080p' : 'SIMULATED LOCAL STREAM', '#38bdf8', true);
       } else if (type === 'video') {
         addLog("Camera access restricted, attempting audio-only fallback", "info");
         try {
@@ -1628,20 +1690,27 @@ export default function App() {
 
     localStreamRef.current = stream;
     setLocalStream(stream);
-    setCallType(type);
+    setCallType('video');
     setIsCallActive(true);
     setIsCallMinimized(false);
-    addLog(`Started ${type} call`, "ok");
+    addLog(isScreen ? "Started direct screen mirroring" : `Started ${type} call`, "ok");
     
     if (isSimulation) {
       const fakeStreams: Record<string, MediaStream> = {};
-      if (type === 'video') {
+      if (isScreen) {
+        fakeStreams['sim_peer_1'] = createSimStream('Remote Mirror Stream', '#38bdf8', true);
+        setScreenSharingPeers(prev => ({ ...prev, sim_peer_1: true }));
+      } else if (type === 'video') {
         fakeStreams['sim_peer_1'] = createSimStream('Simulated Peer Video', '#34d399', true);
       } else {
         fakeStreams['sim_peer_1'] = createSimStream('Simulated Peer Audio', '#34d399', true);
       }
       setRemoteStreams(fakeStreams);
       return;
+    }
+
+    if (isScreen) {
+      handleToggleScreenShare(true);
     }
 
     // Attach local tracks and notify all peers via call-invite with offer SDP
@@ -1668,7 +1737,8 @@ export default function App() {
         if (dc && dc.readyState === 'open') {
           dc.send(JSON.stringify({
             type: 'call-invite',
-            callType: type,
+            callType: isScreen ? 'video' : type,
+            isScreenMirror: isScreen,
             callerName: profile.username,
             callerId: profile.id,
             sdp: pc.localDescription
@@ -1708,7 +1778,10 @@ export default function App() {
     setCallType(incoming.callType);
     setIsCallActive(true);
     setIsCallMinimized(false);
-    addLog(`Joined ${incoming.callType} call with ${incoming.callerName}`, "ok");
+    if (incoming.isScreenMirror) {
+      setScreenSharingPeers(prev => ({ ...prev, [incoming.peerId]: true }));
+    }
+    addLog(`Joined ${incoming.isScreenMirror ? 'screen mirror broadcast' : incoming.callType + ' call'} with ${incoming.callerName}`, "ok");
 
     const pc = peerConnections.current.get(incoming.peerId);
     if (pc) {
@@ -1893,13 +1966,33 @@ export default function App() {
     });
   };
 
-  const handleAddTrack = async (track: MediaStreamTrack) => {
+  const handleAddTrack = async (track: MediaStreamTrack | null) => {
     setCallType('video');
+    if (!track) {
+      peerConnections.current.forEach(async (pc) => {
+        const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (videoSender) {
+          try {
+            await videoSender.replaceTrack(null);
+          } catch (_) {}
+        }
+      });
+      return;
+    }
+
     if (track.kind === 'video') {
       try {
         (track as any).contentHint = 'detail';
       } catch (_) {}
     }
+
+    if (!localStreamRef.current) {
+      localStreamRef.current = new MediaStream([track]);
+      setLocalStream(localStreamRef.current);
+    } else if (!localStreamRef.current.getTracks().includes(track)) {
+      localStreamRef.current.addTrack(track);
+    }
+
     peerConnections.current.forEach(async (pc, peerId) => {
       // If a video sender already exists, replace track directly for seamless transition
       const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
