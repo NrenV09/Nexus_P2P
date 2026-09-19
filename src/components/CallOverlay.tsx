@@ -19,7 +19,8 @@ import {
   GripHorizontal,
   ShieldCheck,
   Radio,
-  Activity
+  Activity,
+  FlipHorizontal
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { UserProfile } from '../types';
@@ -967,6 +968,7 @@ function LocalVideoTile({
 }: LocalVideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [aspectLandscape, setAspectLandscape] = useState(false);
+  const [manualMirror, setManualMirror] = useState<boolean | null>(null);
 
   // Check if camera has a live video track
   const hasActiveCameraTrack = Boolean(
@@ -1029,7 +1031,9 @@ function LocalVideoTile({
         className={cn(
           "w-full h-full transition-all duration-150",
           fitMode === 'contain' ? "object-contain" : "object-cover",
-          hasActiveScreenTrack ? "transform-none" : "transform -scale-x-100",
+          (hasActiveScreenTrack ? false : (manualMirror !== null ? manualMirror : true)) 
+            ? "transform -scale-x-100" 
+            : "transform-none",
           showVideo ? "opacity-100" : "opacity-0 pointer-events-none absolute inset-0"
         )}
       />
@@ -1060,6 +1064,21 @@ function LocalVideoTile({
       {/* Top Controls Overlay: Spotlight / Fit / Aspect info */}
       {!isThumbnail && (
         <div className="absolute top-3 right-3 flex items-center gap-1.5 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/* Flip / Mirror Camera button */}
+          {!hasActiveScreenTrack && showVideo && (
+            <button
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                setManualMirror(prev => (prev === null ? false : !prev)); 
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-black/60 hover:bg-black/85 text-xs font-medium text-white/90 backdrop-blur-xl border border-white/10 flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+              title="Mirror / Flip camera view"
+            >
+              <FlipHorizontal className="w-3.5 h-3.5 text-zinc-300" />
+              <span className="text-[11px]">Flip</span>
+            </button>
+          )}
+
           {/* Fit / Fill toggle button */}
           {onToggleFit && (
             <button
