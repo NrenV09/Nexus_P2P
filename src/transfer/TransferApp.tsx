@@ -837,16 +837,6 @@ export default function App() {
       {/* Header */}
       <header className="z-10 h-auto md:h-16 py-3 md:py-0 border-b border-white/40 dark:border-transparent dark:border-white/10 bg-white/30 dark:bg-transparent backdrop-blur-3xl flex flex-wrap md:flex-nowrap items-center justify-between px-3 md:px-6 lg:px-8 shadow-sm flex-shrink-0 relative gap-x-2 gap-y-3 md:gap-y-0">
         <div className="flex items-center gap-2 md:gap-3 lg:gap-4 flex-shrink-0 min-w-0">
-          <button 
-            onClick={toggleSimulation}
-            className={cn(
-               "w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 border rounded-xl lg:rounded-2xl flex items-center justify-center font-medium text-xl shadow-sm flex-shrink-0 transition-colors cursor-pointer",
-               isSimulation ? "bg-accent text-white border-accent" : "bg-accent/10 border-accent/20 text-accent hover:bg-accent/20"
-            )}
-            title={isSimulation ? "Disable Simulation Mode" : "Enable Simulation Mode"}
-          >
-            <RefreshCw className={cn("w-4 h-4 lg:w-5 lg:h-5", isSimulation && "animate-spin")} />
-          </button>
           <div className="min-w-0">
             <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap">
               <span className="hidden sm:inline">Quantum Link</span>
