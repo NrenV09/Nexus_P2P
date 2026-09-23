@@ -18,7 +18,8 @@ import {
   Share,
   Moon,
   Sun,
-  Network
+  Network,
+  Maximize2
 } from 'lucide-react';
 
 import { cn, formatBytes } from '../lib/utils';
@@ -93,6 +94,7 @@ export default function App() {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isSimulation, setIsSimulation] = useState(false);
   const [showNetworkMapModal, setShowNetworkMapModal] = useState(false);
+  const [matrixTab, setMatrixTab] = useState<'standard' | 'network_map'>('standard');
 
   // --- Refs ---
   const cancelTransferRef = useRef(false);
@@ -1178,15 +1180,39 @@ export default function App() {
               <section className="col-span-1 lg:col-span-4 flex flex-col gap-4 flex-shrink-0 lg:overflow-y-auto scrollbar-hide">
                 <div className="glass-panel p-5 flex-shrink-0">
                   <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                    <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
-                    <button
-                      onClick={() => setShowNetworkMapModal(true)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30 transition-all cursor-pointer shadow-sm group hover:scale-[1.02] active:scale-[0.98]"
-                      title="Open Nexus Network Map (Drag & drop files to individual peers, see direct bypass lines & live calls)"
-                    >
-                      <Network className="w-3.5 h-3.5 text-accent group-hover:scale-110 transition-transform" />
-                      <span>Nexus Network Map ➔</span>
-                    </button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
+                      <div className="inline-flex p-0.5 rounded-xl bg-black/5 dark:bg-white/5 border border-white/10 text-xs">
+                        <button
+                          onClick={() => setMatrixTab('standard')}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer",
+                            matrixTab === 'standard' ? "bg-accent text-white shadow-sm" : "text-muted hover:text-text"
+                          )}
+                        >
+                          Port Setup
+                        </button>
+                        <button
+                          onClick={() => setMatrixTab('network_map')}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center gap-1.5",
+                            matrixTab === 'network_map' ? "bg-accent text-white shadow-sm" : "text-accent hover:bg-accent/10"
+                          )}
+                        >
+                          <Network className="w-3.5 h-3.5" />
+                          <span>Nexus Network Map ➔</span>
+                        </button>
+                      </div>
+                    </div>
+                    {matrixTab === 'network_map' && (
+                      <button
+                        onClick={() => setShowNetworkMapModal(true)}
+                        className="p-1.5 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent transition-colors cursor-pointer"
+                        title="Maximize Nexus Network Map to Fullscreen"
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button 
@@ -1210,7 +1236,38 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="glass-panel flex-1 flex flex-col relative overflow-hidden lg:min-h-0 min-h-[400px]">
+                {matrixTab === 'network_map' ? (
+                  <div className="flex-1 flex flex-col relative overflow-hidden lg:min-h-0 min-h-[580px] rounded-3xl shadow-xl">
+                    <NexusNetworkMap 
+                      localProfile={profile}
+                      role={role}
+                      peerProfiles={peerProfiles}
+                      connectedCount={connectedCount}
+                      dataChannels={dataChannels.current}
+                      activeTransfer={transfer}
+                      messages={messages}
+                      logs={logs}
+                      onSendFileToPeer={sendFile}
+                      onSendMessage={(text) => sendMessage(text)}
+                      onAddReceivedFile={(file) => {
+                        setFiles(prev => [{
+                          id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+                          name: file.name,
+                          size: file.size,
+                          mimeType: file.type || 'application/octet-stream',
+                          senderName: 'Network Peer',
+                          senderColor: 'bg-accent',
+                          timestamp: Date.now(),
+                          status: 'completed',
+                          isOutgoing: false,
+                          blob: file
+                        }, ...prev]);
+                      }}
+                      isModal={false}
+                    />
+                  </div>
+                ) : (
+                  <div className="glass-panel flex-1 flex flex-col relative overflow-hidden lg:min-h-0 min-h-[400px]">
                   <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center w-full text-center">
                     <div className="text-sm font-medium text-muted self-start w-full text-left mb-6 pb-2 border-b border-white/20 dark:border-transparent dark:border-white/10 dark:border-transparent ">
                       Handshake Port
@@ -1391,6 +1448,7 @@ export default function App() {
                     )}
                   </div>
                 </div>
+                )}
               </section>
 
               {/* Rest of the Sections: File Payload & Logs */}
@@ -1623,6 +1681,21 @@ export default function App() {
                 messages={messages}
                 logs={logs}
                 onSendFileToPeer={sendFile}
+                onSendMessage={(text) => sendMessage(text)}
+                onAddReceivedFile={(file) => {
+                  setFiles(prev => [{
+                    id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+                    name: file.name,
+                    size: file.size,
+                    mimeType: file.type || 'application/octet-stream',
+                    senderName: 'Network Peer',
+                    senderColor: 'bg-accent',
+                    timestamp: Date.now(),
+                    status: 'completed',
+                    isOutgoing: false,
+                    blob: file
+                  }, ...prev]);
+                }}
                 onClose={() => setShowNetworkMapModal(false)}
                 isModal={true}
               />
