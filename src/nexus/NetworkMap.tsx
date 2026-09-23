@@ -113,15 +113,21 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
     });
   }, [localPeer, connectedPeers, hostId]);
 
-  // Coordinate Conversion helper
-  const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Touch & Gesture Interaction State
+  const initialTouchDist = useRef<number | null>(null);
+  const initialTouchZoom = useRef<number>(1);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const touchStartTime = useRef<number>(0);
+
+  // Coordinate Conversion helper from client coordinates
+  const getCanvasCoordsFromPoint = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
+    if (!canvas) return { worldX: 0, worldY: 0, mouseX: 0, mouseY: 0 };
     const rect = canvas.getBoundingClientRect();
     const cx = rect.width / 2;
     const cy = rect.height / 2;
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
 
     const currentPan = panRef.current;
     const currentZoom = zoomRef.current;
@@ -130,6 +136,10 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
     const worldY = (mouseY - (cy + currentPan.y)) / currentZoom;
 
     return { worldX, worldY, mouseX, mouseY };
+  };
+
+  const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    return getCanvasCoordsFromPoint(e.clientX, e.clientY);
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -195,6 +205,113 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
     isPanning.current = false;
   };
 
+  // Direct Touch Handlers for Tablets and Mobile
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const { worldX, worldY } = getCanvasCoordsFromPoint(touch.clientX, touch.clientY);
+      lastMousePos.current = { x: touch.clientX, y: touch.clientY };
+      touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+      touchStartTime.current = Date.now();
+
+      // Generous touch hit radius for comfortable direct finger dragging
+      let hitNode: NodePosition | null = null;
+      nodesRef.current.forEach(node => {
+        const dist = Math.hypot(node.x - worldX, node.y - worldY);
+        if (dist <= node.radius + 16) {
+          hitNode = node;
+        }
+      });
+
+      if (hitNode) {
+        isDraggingNode.current = (hitNode as NodePosition).id;
+        setSelectedNodeId((hitNode as NodePosition).id);
+      } else {
+        isPanning.current = true;
+        setSelectedNodeId(null);
+      }
+    } else if (e.touches.length === 2) {
+      // Multi-touch pinch-to-zoom & two-finger pan
+      isDraggingNode.current = null;
+      isPanning.current = false;
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      initialTouchDist.current = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      initialTouchZoom.current = zoomRef.current;
+      lastMousePos.current = {
+        x: (t1.clientX + t2.clientX) / 2,
+        y: (t1.clientY + t2.clientY) / 2
+      };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const { worldX, worldY } = getCanvasCoordsFromPoint(touch.clientX, touch.clientY);
+
+      // Directly drag node with touch
+      if (isDraggingNode.current) {
+        const draggedNode = nodesRef.current.get(isDraggingNode.current);
+        if (draggedNode) {
+          draggedNode.x = worldX;
+          draggedNode.y = worldY;
+          draggedNode.vx = 0;
+          draggedNode.vy = 0;
+        }
+        return;
+      }
+
+      // Pan canvas with touch
+      if (isPanning.current) {
+        const dx = touch.clientX - lastMousePos.current.x;
+        const dy = touch.clientY - lastMousePos.current.y;
+        lastMousePos.current = { x: touch.clientX, y: touch.clientY };
+        setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+        return;
+      }
+    } else if (e.touches.length === 2 && initialTouchDist.current) {
+      // Handle pinch zoom
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const scale = currentDist / initialTouchDist.current;
+      const newZoom = Math.min(2.5, Math.max(0.35, initialTouchZoom.current * scale));
+      setZoom(newZoom);
+
+      // Pan while pinching
+      const midX = (t1.clientX + t2.clientX) / 2;
+      const midY = (t1.clientY + t2.clientY) / 2;
+      const dx = midX - lastMousePos.current.x;
+      const dy = midY - lastMousePos.current.y;
+      lastMousePos.current = { x: midX, y: midY };
+      setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (isDraggingNode.current && touchStartPos.current) {
+      const draggedNode = nodesRef.current.get(isDraggingNode.current);
+      const duration = Date.now() - touchStartTime.current;
+      // Quick tap without significant drag opens peer modal
+      if (draggedNode && duration < 320) {
+        onNodeClick?.(draggedNode.peer);
+      }
+    }
+
+    if (e.touches.length === 0) {
+      isDraggingNode.current = null;
+      isPanning.current = false;
+      initialTouchDist.current = null;
+      touchStartPos.current = null;
+    } else if (e.touches.length === 1) {
+      initialTouchDist.current = null;
+      const touch = e.touches[0];
+      lastMousePos.current = { x: touch.clientX, y: touch.clientY };
+      isPanning.current = true;
+    }
+  };
+
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
@@ -250,6 +367,15 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Prevent default touch gestures (pinch-page-zoom, page scroll) directly on canvas
+    const preventTouchDefault = (e: TouchEvent) => {
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+    };
+    canvas.addEventListener('touchstart', preventTouchDefault, { passive: false });
+    canvas.addEventListener('touchmove', preventTouchDefault, { passive: false });
 
     let isRunning = true;
     let tick = 0;
@@ -666,6 +792,8 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
+      canvas.removeEventListener('touchstart', preventTouchDefault);
+      canvas.removeEventListener('touchmove', preventTouchDefault);
     };
   }, [localPeer, hoveredNode, selectedNodeId, dropTargetNodeId, activeTransfers, activeBatches, activeCall]);
 
@@ -728,14 +856,19 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
         </div>
       </div>
 
-      {/* Main Interactive Canvas */}
+      {/* Main Interactive Canvas with direct touch dragging and mouse support */}
       <canvas
         ref={canvasRef}
-        className="w-full h-full flex-1 cursor-grab active:cursor-grabbing"
+        className="w-full h-full flex-1 cursor-grab active:cursor-grabbing touch-none select-none"
+        style={{ touchAction: 'none' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
         onWheel={handleWheel}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -763,19 +896,6 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
               <span>Drag & drop files onto node to start batch transfer</span>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Empty State Overlay when no external peers are connected */}
-      {connectedPeers.size === 0 && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none p-6 text-center">
-          <div className="w-16 h-16 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center text-accent mb-4 shadow-lg animate-pulse">
-            <Radio className="w-8 h-8" />
-          </div>
-          <h3 className="text-sm font-semibold text-white mb-1">Waiting for Remote Peers</h3>
-          <p className="text-xs text-slate-400 max-w-md">
-            Your local node is actively connected to the WebSocket signaling hub. As other clients open this app or connect over the network, their nodes will organically spawn in this physics graph.
-          </p>
         </div>
       )}
 
