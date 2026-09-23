@@ -83,7 +83,7 @@ export function createSyntheticVideoStream(
       ctx.fillText(`SIMULATED P2P ${callType.toUpperCase()} STREAM • 30 FPS`, 320, 278);
 
       ctx.fillStyle = '#34D399';
-      ctx.fillText('● DIRECT BYPASS ENCRYPTED (SRTP)', 320, 296);
+      ctx.fillText('● WEBRTC ENCRYPTED (SRTP)', 320, 296);
     }
     animId = requestAnimationFrame(render);
   };

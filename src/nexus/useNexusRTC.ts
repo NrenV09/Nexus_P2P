@@ -4,6 +4,8 @@ import {
   NexusTransfer,
   NexusLog,
   NexusCall,
+  GlobalCallState,
+  NexusChatMessage,
   BatchTransferState,
   ConcurrentBypassState
 } from './types';
@@ -104,6 +106,18 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
   const [activeBatches, setActiveBatches] = useState<Map<string, BatchTransferState>>(new Map());
   const [logs, setLogs] = useState<NexusLog[]>([]);
   const [activeCall, setActiveCall] = useState<NexusCall | null>(null);
+  const [messages, setMessages] = useState<NexusChatMessage[]>([]);
+  const [globalCallState, setGlobalCallState] = useState<GlobalCallState>({
+    isActive: false,
+    callId: null,
+    callType: null,
+    initiatorId: null,
+    initiatorName: null,
+    participants: [],
+    streams: {},
+    localStream: null,
+    isGroupCall: false
+  });
 
   // Connection References
   const wsRef = useRef<WebSocket | null>(null);
@@ -122,6 +136,7 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
   // Media Stream References
   const localStreamRef = useRef<MediaStream | null>(null);
   const syntheticCleanupRef = useRef<(() => void) | null>(null);
+  const groupSyntheticCleanupsRef = useRef<(() => void)[]>([]);
   const simBatchTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const wsFailCountRef = useRef<number>(0);
 
@@ -156,7 +171,7 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
   const setupChatDataChannel = useCallback((dc: RTCDataChannel, remotePeerId: string, isBypass = false) => {
     dc.onopen = () => {
       chatChannels.current.set(remotePeerId, dc);
-      addLog('connection', `Control/Chat channel [nexus-chat] opened with ${remotePeerId} ${isBypass ? '(Direct Bypass)' : ''}`, remotePeerId);
+      addLog('connection', `Control/Chat channel [nexus-chat] opened with ${remotePeerId}`, remotePeerId);
       setPeers(prev => {
         const next = new Map(prev);
         const p = next.get(remotePeerId) as NexusPeer | undefined;
@@ -185,6 +200,15 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
         const data = JSON.parse(event.data);
         if (data.type === 'chat') {
           addLog('chat', `${data.senderName}: ${data.text}`, remotePeerId, { direct: true });
+          const newMsg: NexusChatMessage = {
+            id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            senderId: remotePeerId,
+            senderName: data.senderName || 'Peer',
+            text: data.text,
+            timestamp: data.timestamp || Date.now(),
+            isDirect: true
+          };
+          setMessages(prev => [...prev.slice(-300), newMsg]);
         }
       } catch {
         addLog('chat', `Peer ${remotePeerId}: ${event.data}`, remotePeerId, { direct: true });
@@ -275,7 +299,7 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     }));
 
     addLog('signaling', '🌟 Simulation Mode Activated: 4 virtual peers joined mesh topology', 'Simulation');
-    addLog('connection', 'Direct P2P Bypass links verified: [Atlas-Prime] ↔ [You] & [Vortex-9] ↔ [You]', 'Simulation');
+    addLog('connection', 'P2P mesh links verified: [Atlas-Prime] ↔ [You] & [Vortex-9] ↔ [You]', 'Simulation');
     addLog('connection', 'Multiplexed channels ready: [nexus-chat] • [nexus-file-transfer] • A/V Dynamic Media', 'Simulation');
   }, [addLog, localPeer.id]);
 
@@ -289,6 +313,21 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
       syntheticCleanupRef.current();
       syntheticCleanupRef.current = null;
     }
+    if (groupSyntheticCleanupsRef.current) {
+      groupSyntheticCleanupsRef.current.forEach(c => c());
+      groupSyntheticCleanupsRef.current = [];
+    }
+    setGlobalCallState({
+      isActive: false,
+      callId: null,
+      callType: null,
+      initiatorId: null,
+      initiatorName: null,
+      participants: [],
+      streams: {},
+      localStream: null,
+      isGroupCall: false
+    });
     setActiveCall(null);
     setActiveBatches(new Map());
     setPeers(new Map());
@@ -461,15 +500,31 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     // Dynamic track negotiation
     pc.ontrack = (event) => {
       addLog('call', `Media track (${event.track.kind}) received dynamically from ${remotePeerId}`, remotePeerId);
-      const [remoteStream] = event.streams;
-      if (remoteStream) {
-        setActiveCall(prev => {
-          if (prev && (prev.targetId === remotePeerId || prev.callerId === remotePeerId)) {
-            return { ...prev, remoteStream };
-          }
-          return prev;
-        });
-      }
+      const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+      
+      setGlobalCallState(prev => ({
+        ...prev,
+        streams: {
+          ...prev.streams,
+          [remotePeerId]: stream
+        }
+      }));
+
+      setPeers(prev => {
+        const next = new Map(prev);
+        const p = next.get(remotePeerId) as NexusPeer | undefined;
+        if (p) {
+          next.set(remotePeerId, { ...p, stream });
+        }
+        return next;
+      });
+
+      setActiveCall(prev => {
+        if (prev && (prev.targetId === remotePeerId || prev.callerId === remotePeerId)) {
+          return { ...prev, remoteStream: stream };
+        }
+        return prev;
+      });
     };
 
     if (isInitiator) {
@@ -537,16 +592,32 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     ignoreOfferMap.current.set(remotePeerId, false);
 
     pc.ontrack = (event) => {
-      addLog('call', `Bypass media track (${event.track.kind}) received from ${remotePeerId}`, remotePeerId);
-      const [remoteStream] = event.streams;
-      if (remoteStream) {
-        setActiveCall(prev => {
-          if (prev && (prev.targetId === remotePeerId || prev.callerId === remotePeerId)) {
-            return { ...prev, remoteStream };
-          }
-          return prev;
-        });
-      }
+      addLog('call', `Media track (${event.track.kind}) received from ${remotePeerId}`, remotePeerId);
+      const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+
+      setGlobalCallState(prev => ({
+        ...prev,
+        streams: {
+          ...prev.streams,
+          [remotePeerId]: stream
+        }
+      }));
+
+      setPeers(prev => {
+        const next = new Map(prev);
+        const p = next.get(remotePeerId) as NexusPeer | undefined;
+        if (p) {
+          next.set(remotePeerId, { ...p, stream });
+        }
+        return next;
+      });
+
+      setActiveCall(prev => {
+        if (prev && (prev.targetId === remotePeerId || prev.callerId === remotePeerId)) {
+          return { ...prev, remoteStream: stream };
+        }
+        return prev;
+      });
     };
 
     if (isInitiator) {
@@ -585,7 +656,7 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     };
 
     pc.onconnectionstatechange = () => {
-      addLog('connection', `Bypass link to ${remotePeerId}: ${pc.connectionState}`, remotePeerId);
+      addLog('connection', `Peer link to ${remotePeerId}: ${pc.connectionState}`, remotePeerId);
       if (pc.connectionState === 'connected') {
         setPeers(prev => {
           const next = new Map(prev);
@@ -735,6 +806,84 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
 
               case 'network-chat': {
                 addLog('chat', `${payload?.senderName}: ${payload?.text}`, senderId);
+                const newMsg: NexusChatMessage = {
+                  id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                  senderId: senderId || 'network',
+                  senderName: payload?.senderName || 'Peer',
+                  text: payload?.text || '',
+                  timestamp: Date.now()
+                };
+                setMessages(prev => [...prev.slice(-300), newMsg]);
+                break;
+              }
+
+              case 'group-call-start': {
+                const { callId, initiatorId, initiatorName, callType = 'video', participants = [] } = payload || {};
+                addLog('call', `Broadcast: Group ${callType} call initiated by ${initiatorName}. Syncing all peers...`, 'Group Conference');
+
+                setGlobalCallState(prev => ({
+                  ...prev,
+                  isActive: true,
+                  callId: callId || `group-call-${Date.now()}`,
+                  callType,
+                  initiatorId,
+                  initiatorName,
+                  participants: participants.length > 0 ? participants : [initiatorId, localPeer.id],
+                  isGroupCall: true
+                }));
+
+                // Auto-join media mesh if local stream not active yet
+                if (!localStreamRef.current && initiatorId !== localPeer.id) {
+                  navigator.mediaDevices?.getUserMedia({
+                    video: callType === 'video',
+                    audio: true
+                  }).then(stream => {
+                    localStreamRef.current = stream;
+                    setGlobalCallState(curr => ({
+                      ...curr,
+                      localStream: stream,
+                      streams: { ...curr.streams, [localPeer.id]: stream }
+                    }));
+                    setLocalPeer(p => ({ ...p, stream }));
+                    peerConnections.current.forEach(pc => {
+                      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+                    });
+                    bypassConnections.current.forEach(pc => {
+                      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+                    });
+                  }).catch(err => {
+                    console.warn('Could not auto-start group call stream:', err);
+                  });
+                }
+                break;
+              }
+
+              case 'group-call-end': {
+                const { initiatorName } = payload || {};
+                addLog('call', `Group call ended by ${initiatorName || 'host'}.`, 'Group Conference');
+                if (localStreamRef.current) {
+                  localStreamRef.current.getTracks().forEach(t => t.stop());
+                  localStreamRef.current = null;
+                }
+                setGlobalCallState({
+                  isActive: false,
+                  callId: null,
+                  callType: null,
+                  initiatorId: null,
+                  initiatorName: null,
+                  participants: [],
+                  streams: {},
+                  localStream: null,
+                  isGroupCall: false
+                });
+                setPeers(prev => {
+                  const next = new Map(prev);
+                  next.forEach((p: NexusPeer, id: string) => {
+                    next.set(id, { ...p, stream: undefined });
+                  });
+                  return next;
+                });
+                setLocalPeer(p => ({ ...p, stream: undefined }));
                 break;
               }
 
@@ -932,6 +1081,17 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
   const sendMessage = useCallback((text: string, targetPeerId?: string) => {
     if (!text.trim()) return;
 
+    const localMsg: NexusChatMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      senderId: localPeer.id,
+      senderName: localPeer.username,
+      text,
+      timestamp: Date.now(),
+      targetId: targetPeerId,
+      isDirect: Boolean(targetPeerId)
+    };
+    setMessages(prev => [...prev.slice(-300), localMsg]);
+
     if (isSimulation) {
       const recipientName = targetPeerId ? peers.get(targetPeerId)?.username || targetPeerId : 'Global Mesh';
       addLog('chat', `[nexus-chat] You: ${text}`, recipientName, { sender: 'You' });
@@ -944,7 +1104,7 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
           : simPeerList[Math.floor(Math.random() * simPeerList.length)] || DEFAULT_SIM_PEERS[0];
 
         const responses = [
-          `Direct bypass packet acknowledged over [nexus-chat]. RTT: 12ms.`,
+          `Packet acknowledged over [nexus-chat]. RTT: 12ms.`,
           `Throughput optimal (8.4 MB/s). Ready for multiplexed batch file transfer.`,
           `SCTP isolated data channel open and verified.`,
           `Received ping! Topology status normal.`,
@@ -955,6 +1115,17 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
         addLog('chat', `[nexus-chat] ${respondent.username}: ${reply}`, respondent.username, {
           sender: respondent.username
         });
+
+        const simMsg: NexusChatMessage = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          senderId: respondent.id,
+          senderName: respondent.username,
+          text: reply,
+          timestamp: Date.now(),
+          targetId: localPeer.id,
+          isDirect: Boolean(targetPeerId)
+        };
+        setMessages(prev => [...prev.slice(-300), simMsg]);
       }, 700 + Math.random() * 500);
       return;
     }
@@ -1171,6 +1342,172 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     }
   }, [activeCall, addLog, isSimulation, sendSignal]);
 
+  // Start Group Call
+  const startGroupCall = useCallback(async (callType: 'audio' | 'video' = 'video') => {
+    const callId = `group-call-${Date.now()}`;
+    addLog('call', `Initiating mesh group ${callType} conference...`, 'Group Conference');
+
+    if (isSimulation) {
+      // Create local stream
+      let localStream: MediaStream;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: callType === 'video',
+          audio: true
+        });
+      } catch {
+        const syntheticLocal = createSyntheticVideoStream(`You (${localPeer.username})`, callType);
+        localStream = syntheticLocal.stream;
+      }
+      localStreamRef.current = localStream;
+
+      // 4 simulated peers + local = 5 participants!
+      const simPeersList: NexusPeer[] = Array.from(peers.values()) as NexusPeer[];
+      const streamsMap: Record<string, MediaStream> = {
+        [localPeer.id]: localStream
+      };
+      const cleanups: (() => void)[] = [];
+
+      simPeersList.forEach((peer: NexusPeer) => {
+        const syn = createSyntheticVideoStream(peer.username, callType);
+        streamsMap[peer.id] = syn.stream;
+        cleanups.push(syn.cleanup);
+      });
+
+      groupSyntheticCleanupsRef.current = cleanups;
+      const participantIds = [localPeer.id, ...simPeersList.map(p => p.id)];
+
+      setGlobalCallState({
+        isActive: true,
+        callId,
+        callType,
+        initiatorId: localPeer.id,
+        initiatorName: localPeer.username,
+        participants: participantIds,
+        streams: streamsMap,
+        localStream,
+        isGroupCall: true
+      });
+
+      setPeers(prev => {
+        const next = new Map(prev);
+        simPeersList.forEach((p: NexusPeer) => {
+          const stream = streamsMap[p.id];
+          next.set(p.id, { ...p, stream });
+        });
+        return next;
+      });
+
+      setLocalPeer(prev => ({ ...prev, stream: localStream }));
+      addLog('call', `Group ${callType} conference live! All 5 nodes connected in mesh topology.`, 'Group Conference');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: callType === 'video',
+        audio: true
+      });
+      localStreamRef.current = stream;
+
+      const participantIds = [localPeer.id, ...Array.from(peers.keys())];
+
+      setGlobalCallState({
+        isActive: true,
+        callId,
+        callType,
+        initiatorId: localPeer.id,
+        initiatorName: localPeer.username,
+        participants: participantIds,
+        streams: { [localPeer.id]: stream },
+        localStream: stream,
+        isGroupCall: true
+      });
+
+      setLocalPeer(prev => ({ ...prev, stream }));
+
+      // Broadcast room-wide
+      sendSignal('group-call-start', '', {
+        callId,
+        initiatorId: localPeer.id,
+        initiatorName: localPeer.username,
+        callType,
+        participants: participantIds
+      });
+
+      // Add tracks to all open peer connections
+      peerConnections.current.forEach(pc => {
+        stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      });
+      bypassConnections.current.forEach(pc => {
+        stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      });
+
+      addLog('call', `Broadcast group ${callType} call to room participants.`, 'Group Conference');
+    } catch (err: any) {
+      addLog('error', `Could not start group call: ${err.message}`, 'Group Conference');
+    }
+  }, [addLog, isSimulation, localPeer.id, localPeer.username, peers, sendSignal]);
+
+  // End Group Call
+  const endGroupCall = useCallback(() => {
+    if (isSimulation) {
+      if (groupSyntheticCleanupsRef.current) {
+        groupSyntheticCleanupsRef.current.forEach(c => c());
+        groupSyntheticCleanupsRef.current = [];
+      }
+    } else {
+      sendSignal('group-call-end', '', {
+        initiatorId: localPeer.id,
+        initiatorName: localPeer.username
+      });
+    }
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(t => t.stop());
+      localStreamRef.current = null;
+    }
+
+    setGlobalCallState({
+      isActive: false,
+      callId: null,
+      callType: null,
+      initiatorId: null,
+      initiatorName: null,
+      participants: [],
+      streams: {},
+      localStream: null,
+      isGroupCall: false
+    });
+
+    setPeers(prev => {
+      const next = new Map(prev);
+      next.forEach((p: NexusPeer, id: string) => {
+        next.set(id, { ...p, stream: undefined });
+      });
+      return next;
+    });
+
+    setLocalPeer(prev => ({ ...prev, stream: undefined }));
+    addLog('call', 'Group conference ended cleanly.', 'Group Conference');
+  }, [addLog, isSimulation, localPeer.id, localPeer.username, sendSignal]);
+
+  // Simulate group call helper
+  const simulateGroupCall = useCallback(() => {
+    startGroupCall('video');
+  }, [startGroupCall]);
+
+  // Globally synced peers list (contains ID, name, connection status, and active MediaStreams)
+  const peersList = useMemo<NexusPeer[]>(() => {
+    return (Array.from(peers.values()) as NexusPeer[]).map((peer: NexusPeer) => {
+      const stream = globalCallState.streams[peer.id] || peer.stream;
+      return {
+        ...peer,
+        stream
+      };
+    });
+  }, [peers, globalCallState.streams]);
+
   // Derived Concurrent States for Visualization
   const concurrentPeerStates = useMemo<ConcurrentBypassState[]>(() => {
     return (Array.from(peers.values()) as NexusPeer[]).map(peer => {
@@ -1199,6 +1536,9 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
   return {
     localPeer,
     peers,
+    peersList,
+    messages,
+    globalCallState,
     hostId,
     wsConnected,
     isSimulation,
@@ -1206,6 +1546,7 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     simulateAddPeer,
     simulateIncomingCall,
     simulateIncomingBatch,
+    simulateGroupCall,
     activeTransfers,
     activeBatches,
     concurrentPeerStates,
@@ -1217,6 +1558,8 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     sendMessage,
     startCall,
     answerCall,
-    endCall
+    endCall,
+    startGroupCall,
+    endGroupCall
   };
 }

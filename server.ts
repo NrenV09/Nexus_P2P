@@ -142,6 +142,19 @@ async function startServer() {
             break;
           }
 
+          // Group Video Call room-wide broadcasts: notify all peers immediately
+          case "group-call-start":
+          case "group-call-end":
+          case "group-call-join":
+          case "group-call-signal": {
+            room.forEach(peer => {
+              if (peer.ws.readyState === WebSocket.OPEN) {
+                peer.ws.send(raw);
+              }
+            });
+            break;
+          }
+
           // Network chat and transfer alerts: broadcast to all connected clients
           case "network-chat":
           case "transfer-start":

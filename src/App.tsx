@@ -58,7 +58,7 @@ import { DataStream } from './components/DataStream';
 import { PacketTransferAnimation } from './components/PacketTransferAnimation';
 import { ProfileModal } from './components/ProfileModal';
 import { ViewProfileModal } from './components/ViewProfileModal';
-import { NexusContainer } from './nexus';
+import { NexusContainer, NexusProvider, UnifiedVideoGrid, useNexus } from './nexus';
 import { NexusFailoverHUD } from './components/NexusFailoverHUD';
 import { NexusNetworkMap } from './components/NexusNetworkMap';
 import { CallOverlay } from './components/CallOverlay';
@@ -73,7 +73,8 @@ import { createSafeDiskWriter, triggerBrowserFileDownload, purgeAllTempStorage }
 const CHUNK_SIZE = 64000; // WebRTC safe chunk size (strictly below 64KB SCTP limit for Firefox, Safari & iOS)
 const MAX_BUFFERED_AMOUNT = 512 * 1024; // 512KB safe flow control threshold to prevent SCTP buffer overflows
 
-export default function App() {
+function QuantumLinkApp() {
+  const nexus = useNexus();
   // --- State ---
   const [profile, setProfile] = useState<UserProfile>(() => {
     let saved = null;
@@ -2675,12 +2676,15 @@ export default function App() {
             <button 
               onClick={() => setActiveTab("preview")}
               className={cn(
-                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-semibold transition-all rounded-xl whitespace-nowrap flex items-center gap-1.5",
+                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-semibold transition-all rounded-xl whitespace-nowrap flex items-center gap-1.5 relative",
                 activeTab === "preview" ? "bg-white dark:bg-transparent text-text shadow-sm" : "text-muted hover:text-text cursor-pointer"
               )}
             >
               <Network className="w-3.5 h-3.5 text-accent" />
               <span>Preview</span>
+              {nexus?.globalCallState?.isActive && (
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping absolute -top-0.5 -right-0.5" />
+              )}
             </button>
             <button 
               onClick={() => { setActiveTab("qr"); addLog("Entering QR Utility", "info"); }}
@@ -2721,6 +2725,19 @@ export default function App() {
         </div>
 
         <div className="flex gap-2 md:gap-3 lg:gap-6 items-center flex-shrink-0 ml-auto md:ml-0">
+          {/* Active 5-Node Group Video Conference Banner (Global State Sync) */}
+          {nexus?.globalCallState?.isActive && activeTab !== "preview" && (
+            <button
+              onClick={() => setActiveTab("preview")}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-500 hover:bg-rose-500/25 transition-all text-xs font-semibold cursor-pointer shadow-sm animate-pulse"
+              title="5-Peer Group Conference Live in Preview. Click to join view."
+            >
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+              <span className="hidden sm:inline">5-Node Call Live</span>
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {/* Active Call Background Indicator (PiP mode indicator) */}
           {isCallActive && isCallMinimized && (
             <button
@@ -2851,7 +2868,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} 
               exit={{ opacity: 0, y: -15, filter: "blur(4px)" }} 
               transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="h-full w-full overflow-hidden"
+              className="h-full w-full overflow-y-auto"
             >
               <NexusContainer 
                 localUsername={profile.username}
@@ -3595,6 +3612,14 @@ export default function App() {
         onDecline={declineCall}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <NexusProvider roomId="nexus-main">
+      <QuantumLinkApp />
+    </NexusProvider>
   );
 }
 

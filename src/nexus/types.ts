@@ -6,7 +6,33 @@ export interface NexusPeer {
   joinedAt: number;
   pingMs?: number;
   status: 'connecting' | 'connected' | 'disconnected';
-  bypassPeers: string[]; // List of peer IDs with whom this peer has an active direct P2P bypass link
+  bypassPeers: string[]; // List of peer IDs with whom this peer has an active direct P2P link
+  stream?: MediaStream; // Active media stream for group/private audio/video calls
+  isMuted?: boolean;
+  isVideoOff?: boolean;
+}
+
+export interface GlobalCallState {
+  isActive: boolean;
+  callId: string | null;
+  callType: 'audio' | 'video' | null;
+  initiatorId: string | null;
+  initiatorName: string | null;
+  participants: string[]; // Array of peer IDs in call
+  streams: Record<string, MediaStream>; // peerId -> MediaStream
+  localStream: MediaStream | null;
+  isGroupCall: boolean;
+}
+
+export interface NexusChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderColor?: string;
+  text: string;
+  timestamp: number;
+  isDirect?: boolean;
+  targetId?: string;
 }
 
 export interface NexusTransfer {

@@ -11,11 +11,44 @@ interface GlobalLogProps {
 export const GlobalLog: React.FC<GlobalLogProps> = ({ logs, onSendMessage, onClearLogs }) => {
   const [filter, setFilter] = useState<'all' | 'connection' | 'call' | 'transfer' | 'chat'>('all');
   const [inputMessage, setInputMessage] = useState('');
-  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const isAtBottomRef = useRef<boolean>(true);
+  const [hasNewUnseen, setHasNewUnseen] = useState(false);
 
-  // Auto-scroll to bottom
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const threshold = 50;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+    isAtBottomRef.current = atBottom;
+    if (atBottom) {
+      setHasNewUnseen(false);
+    }
+  };
+
+  const scrollToBottom = (smooth = true) => {
+    const el = scrollContainerRef.current;
+    if (el) {
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto'
+      });
+      isAtBottomRef.current = true;
+      setHasNewUnseen(false);
+    }
+  };
+
+  // Stabilized Auto-scroll: Only auto-scrolls if the user is already at the bottom
+  // This prevents the violent scroll glitching and allows reading earlier logs
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (isAtBottomRef.current) {
+      const el = scrollContainerRef.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
+    } else {
+      setHasNewUnseen(true);
+    }
   }, [logs]);
 
   const filteredLogs = logs.filter(log => {
@@ -120,14 +153,18 @@ export const GlobalLog: React.FC<GlobalLogProps> = ({ logs, onSendMessage, onCle
       </div>
 
       {/* Log Feed */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-xs scrollbar-thin scrollbar-thumb-white/10">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 space-y-2 font-mono text-xs scrollbar-thin scrollbar-thumb-white/10 relative"
+      >
         {filteredLogs.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-slate-500 text-xs text-center py-12">
             <Activity className="w-6 h-6 mb-2 opacity-50" />
             <span>No network events recorded for filter "{filter}".</span>
           </div>
         ) : (
-          filteredLogs.map(log => {
+          filteredLogs.map((log) => {
             const isCall = log.type === 'call';
             const isBatch = log.type === 'transfer' && (log.text.toLowerCase().includes('batch') || Boolean(log.metadata?.batchId));
 
@@ -160,7 +197,17 @@ export const GlobalLog: React.FC<GlobalLogProps> = ({ logs, onSendMessage, onCle
             );
           })
         )}
-        <div ref={logEndRef} />
+
+        {/* Floating Jump to Bottom Button when scrolled up */}
+        {hasNewUnseen && (
+          <button
+            onClick={() => scrollToBottom(true)}
+            className="sticky bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-accent/90 hover:bg-accent text-white text-[11px] font-sans font-semibold shadow-lg backdrop-blur-md border border-white/20 flex items-center gap-1.5 cursor-pointer transition-all hover:scale-105 animate-bounce"
+          >
+            <span>Jump to latest</span>
+            <span className="text-[10px]">↓</span>
+          </button>
+        )}
       </div>
 
       {/* Message Input Footer (Multiplexed text channel) */}

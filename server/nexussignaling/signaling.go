@@ -133,6 +133,11 @@ func (h *Hub) RouteMessage(sender *Client, msg *SignalMessage) {
 	case TypeNetworkChat, TypeTransferStart, TypeTransferEnd:
 		room.Broadcast(msg, "")
 
+	// Group Video Call Announcements & Mesh Signaling:
+	// Room-wide broadcast ensures every peer immediately detects conference start/end
+	case TypeGroupCallStart, TypeGroupCallEnd, TypeGroupCallJoin, TypeGroupCallSignal:
+		room.Broadcast(msg, "")
+
 	// Private Call Announcements:
 	// "private calls occurring between two users can also be seen here by everyone on the network"
 	case TypePrivateCallStart, TypePrivateCallEnd:

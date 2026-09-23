@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { NexusPeer, NexusTransfer, NodePosition, NexusCall, BatchTransferState, ConcurrentBypassState } from './types';
+import { NexusPeer, NexusTransfer, NodePosition, NexusCall, BatchTransferState, ConcurrentBypassState, GlobalCallState } from './types';
 import { ZoomIn, ZoomOut, RotateCcw, ShieldCheck, Zap, Radio, HardDrive, Phone, Video } from 'lucide-react';
 
 interface NetworkMapProps {
@@ -9,6 +9,7 @@ interface NetworkMapProps {
   activeTransfers?: Map<string, NexusTransfer>;
   activeBatches?: Map<string, BatchTransferState>;
   activeCall?: NexusCall | null;
+  globalCallState?: GlobalCallState;
   concurrentPeerStates?: ConcurrentBypassState[];
   onFileDrop?: (targetPeerId: string, file: File) => void;
   onFilesDrop?: (targetPeerId: string, files: File[]) => void;
@@ -33,6 +34,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
   activeTransfers,
   activeBatches,
   activeCall,
+  globalCallState,
   concurrentPeerStates,
   onFileDrop,
   onFilesDrop,
@@ -567,16 +569,16 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
 
                 if (isPairInCall && activeBatchForLink) {
                   ctx.fillStyle = '#F43F5E';
-                  ctx.fillText(`⚡ DIRECT BYPASS • 📹 LIVE CALL • 📦 BATCH (${activeBatchForLink.progress}%)`, midX, midY - 8);
+                  ctx.fillText(`📹 LIVE CALL • 📦 BATCH (${activeBatchForLink.progress}%)`, midX, midY - 8);
                 } else if (isPairInCall) {
                   ctx.fillStyle = '#F43F5E';
-                  ctx.fillText('⚡ DIRECT BYPASS • 📹 LIVE CALL STREAM', midX, midY - 8);
+                  ctx.fillText('📹 LIVE CALL STREAM', midX, midY - 8);
                 } else if (activeBatchForLink) {
                   ctx.fillStyle = '#10B981';
-                  ctx.fillText(`⚡ DIRECT BYPASS • 📦 BATCH (${activeBatchForLink.progress}%)`, midX, midY - 8);
+                  ctx.fillText(`📦 BATCH (${activeBatchForLink.progress}%)`, midX, midY - 8);
                 } else {
                   ctx.fillStyle = '#10B981';
-                  ctx.fillText('⚡ DIRECT BYPASS', midX, midY - 6);
+                  ctx.fillText('P2P LINK', midX, midY - 6);
                 }
                 ctx.restore();
               }
@@ -585,7 +587,28 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
         }
       });
 
-      // C. Active Call A/V Media Energy Aura (Multiplexed on the connection)
+      // C. Active Group Video Conference Mesh
+      if (globalCallState?.isActive && globalCallState.participantIds.length > 1) {
+        const groupNodes = nodes.filter(n => globalCallState.participantIds.includes(n.id));
+        for (let i = 0; i < groupNodes.length; i++) {
+          for (let j = i + 1; j < groupNodes.length; j++) {
+            const na = groupNodes[i];
+            const nb = groupNodes[j];
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(na.x, na.y);
+            ctx.lineTo(nb.x, nb.y);
+            ctx.strokeStyle = 'rgba(244, 63, 94, 0.45)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.lineDashOffset = -tick * 0.6;
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      }
+
+      // D. Active Call A/V Media Energy Aura (Multiplexed on the connection)
       if (isCallActive && callCallerNode && callTargetNode) {
         ctx.save();
         const callDist = Math.hypot(callTargetNode.x - callCallerNode.x, callTargetNode.y - callCallerNode.y) || 1;
@@ -741,7 +764,14 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
         ctx.stroke();
 
         // Live Call Badge on top of Node
-        if (isNodeInCall) {
+        const isNodeInGroupCall = globalCallState?.isActive && globalCallState.participantIds.includes(node.id);
+        if (isNodeInGroupCall) {
+          ctx.font = 'bold 9px "JetBrains Mono", monospace';
+          ctx.fillStyle = '#F43F5E';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText('📹 GROUP', node.x, node.y - node.radius - 6);
+        } else if (isNodeInCall) {
           ctx.font = 'bold 9px "JetBrains Mono", monospace';
           ctx.fillStyle = activeCall!.callType === 'video' ? '#F43F5E' : '#A855F7';
           ctx.textAlign = 'center';
@@ -890,7 +920,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
           </div>
           <div className="text-[11px] font-mono text-slate-400 space-y-0.5">
             <div>Peer ID: <span className="text-slate-200">{hoveredNode.id}</span></div>
-            <div>Bypass Links: <span className="text-emerald-400">{hoveredNode.peer.bypassPeers?.length || 0} active</span></div>
+            <div>Active Mesh Links: <span className="text-emerald-400">{hoveredNode.peer.bypassPeers?.length || 0} active</span></div>
             <div className="text-[10px] text-accent pt-1 flex items-center gap-1">
               <Zap className="w-3 h-3" />
               <span>Drag & drop files onto node to start batch transfer</span>

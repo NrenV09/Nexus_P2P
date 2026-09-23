@@ -31,6 +31,12 @@ const (
 	TypeTransferEnd    MessageType = "transfer-end"
 	TypePrivateCallStart MessageType = "private-call-start"
 	TypePrivateCallEnd   MessageType = "private-call-end"
+
+	// Group Video Call Signaling & Room-Wide Broadcast
+	TypeGroupCallStart  MessageType = "group-call-start"
+	TypeGroupCallEnd    MessageType = "group-call-end"
+	TypeGroupCallJoin   MessageType = "group-call-join"
+	TypeGroupCallSignal MessageType = "group-call-signal"
 )
 
 // SignalMessage represents the envelope for all WebSocket messages
