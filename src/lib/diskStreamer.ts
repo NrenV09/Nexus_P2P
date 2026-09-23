@@ -317,6 +317,8 @@ export async function createSafeDiskWriter(
   };
 }
 
+import { purgeFailedTransferCache } from './cacheStorage';
+
 /**
  * Triggers safe browser file download from Blob/File
  */
@@ -331,4 +333,66 @@ export function triggerBrowserFileDownload(fileOrBlob: Blob | File, fileName: st
   setTimeout(() => {
     URL.revokeObjectURL(url);
   }, 60000);
+}
+
+/**
+ * Immediately purges any half-transferred or orphaned temporary chunks
+ * from OPFS, IndexedDB, and CacheStorage.
+ */
+export async function purgeAllTempStorage(targetName?: string): Promise<void> {
+  // 1. Clean OPFS temporary files
+  if (typeof navigator !== 'undefined' && typeof navigator.storage?.getDirectory === 'function') {
+    try {
+      const root = await navigator.storage.getDirectory();
+      if ((root as any).values) {
+        for await (const entry of (root as any).values()) {
+          if (entry.kind === 'file') {
+            const name: string = entry.name;
+            if (name.startsWith('nexus_temp_') || name.startsWith('transfer-') || (targetName && name.includes(targetName))) {
+              try {
+                if (typeof entry.remove === 'function') {
+                  await entry.remove();
+                } else if (typeof root.removeEntry === 'function') {
+                  await root.removeEntry(name);
+                }
+              } catch (_) {}
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Clean IndexedDB stream chunks
+  if (typeof indexedDB !== 'undefined') {
+    try {
+      const dbReq = indexedDB.open('nexus_stream_cache', 1);
+      dbReq.onsuccess = () => {
+        try {
+          const db = dbReq.result;
+          if (db.objectStoreNames.contains('chunks')) {
+            const tx = db.transaction('chunks', 'readwrite');
+            const store = tx.objectStore('chunks');
+            if (!targetName) {
+              store.clear();
+            } else {
+              const cursorReq = store.openCursor();
+              cursorReq.onsuccess = (e: any) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                  if (cursor.key.toString().includes(targetName)) {
+                    store.delete(cursor.key);
+                  }
+                  cursor.continue();
+                }
+              };
+            }
+          }
+        } catch (_) {}
+      };
+    } catch (_) {}
+  }
+
+  // 3. Clean CacheStorage
+  await purgeFailedTransferCache(targetName);
 }

@@ -54,6 +54,31 @@ export async function deleteCachedFile(url: string): Promise<boolean> {
 }
 
 /**
+ * Immediately deletes any partial or failed transfer traces from CacheStorage.
+ */
+export async function purgeFailedTransferCache(fileIdOrName?: string): Promise<void> {
+  if (typeof window === 'undefined' || !window.caches) return;
+  try {
+    const cache = await window.caches.open(CACHE_NAME);
+    const keys = await cache.keys();
+    for (const request of keys) {
+      const url = request.url;
+      if (
+        !fileIdOrName ||
+        url.includes(encodeURIComponent(fileIdOrName)) ||
+        url.includes(fileIdOrName) ||
+        url.includes('partial') ||
+        url.includes('nexus_temp')
+      ) {
+        await cache.delete(request);
+      }
+    }
+  } catch (err) {
+    console.warn("purgeFailedTransferCache error:", err);
+  }
+}
+
+/**
  * Deletes the entire cache bucket and all stored binaries/files.
  */
 export async function clearAllCache(): Promise<boolean> {

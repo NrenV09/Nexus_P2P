@@ -39,6 +39,7 @@ import { PacketTransferAnimation } from '../components/PacketTransferAnimation';
 import { ProfileModal } from '../components/ProfileModal';
 import { ViewProfileModal } from '../components/ViewProfileModal';
 import { generateRandomName } from '../lib/nameGenerator';
+import { purgeAllTempStorage } from '../lib/diskStreamer';
 
 const CHUNK_SIZE = 64000; // WebRTC safe chunk size (below 64KB SCTP limit for Firefox, Safari & iOS)
 const MAX_BUFFERED_AMOUNT = 512 * 1024; // 512KB safe flow control threshold to prevent SCTP buffer overflows
@@ -108,13 +109,6 @@ export default function App() {
     setLogs(prev => [...prev.slice(-20), { text, type, timestamp: new Date() }]);
   }, []);
 
-  const handleCancelTransfer = useCallback(() => {
-    cancelTransferRef.current = true;
-    setTransfer(null);
-    fileBuffers.current.clear();
-    addLog("Transfer stopped / discarded", "err");
-  }, [addLog]);
-
   const localConnectionRef = useRef<RTCPeerConnection | null>(null);
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const dataChannels = useRef<Map<string, RTCDataChannel>>(new Map());
@@ -123,6 +117,121 @@ export default function App() {
   const [connectedCount, setConnectedPeers] = useState(0);
   const fileBuffers = useRef<Map<string, any>>(new Map());
   const lastUpdateRef = useRef<number>(Date.now());
+
+  const transferRef = useRef<TransferProgress | null>(null);
+  useEffect(() => {
+    transferRef.current = transfer;
+  }, [transfer]);
+
+  // Immediately removes partial or failed chunks from memory, OPFS, and storage cache
+  const cleanupBuffersAndCache = useCallback(async (targetFileName?: string, targetPeerId?: string) => {
+    if (targetPeerId && fileBuffers.current.has(targetPeerId)) {
+      const buf = fileBuffers.current.get(targetPeerId);
+      try {
+        if (buf.writable && typeof buf.writable.abort === 'function') {
+          try { await buf.writable.abort(); } catch (_) {}
+        }
+        if (buf.fileHandle && typeof buf.fileHandle.remove === 'function') {
+          try { await buf.fileHandle.remove(); } catch (_) {}
+        }
+        if (Array.isArray(buf.chunks)) {
+          buf.chunks.length = 0;
+        }
+        buf.isFinished = true;
+      } catch (e) {
+        console.warn("Failed to abort file buffer for peer:", e);
+      }
+      fileBuffers.current.delete(targetPeerId);
+    } else {
+      for (const [, buf] of fileBuffers.current.entries()) {
+        try {
+          if (buf.writable && typeof buf.writable.abort === 'function') {
+            try { await buf.writable.abort(); } catch (_) {}
+          }
+          if (buf.fileHandle && typeof buf.fileHandle.remove === 'function') {
+            try { await buf.fileHandle.remove(); } catch (_) {}
+          }
+          if (Array.isArray(buf.chunks)) {
+            buf.chunks.length = 0;
+          }
+          buf.isFinished = true;
+        } catch (e) {
+          console.warn("Failed to abort file buffer:", e);
+        }
+      }
+      fileBuffers.current.clear();
+    }
+
+    try {
+      await purgeAllTempStorage(targetFileName);
+    } catch (e) {
+      console.warn("purgeAllTempStorage error:", e);
+    }
+  }, []);
+
+  // Universal transfer failure handler: notifies remote peer, displays prominent error log, and cleans cache immediately
+  const handleTransferFailure = useCallback(async (
+    reason: string,
+    peerId?: string,
+    fileName?: string,
+    notifyRemote = true
+  ) => {
+    const currentTransfer = transferRef.current;
+    const targetFileName = fileName || currentTransfer?.name || 'File';
+    const roleType = currentTransfer?.type || (peerId ? 'receiver' : 'sender');
+
+    cancelTransferRef.current = true;
+    setTransfer(null);
+
+    if (notifyRemote) {
+      const errorPayload = JSON.stringify({
+        type: 'transfer-failed',
+        fileName: targetFileName,
+        reason,
+        failedBy: roleType
+      });
+
+      if (peerId && dataChannels.current.has(peerId)) {
+        const dc = dataChannels.current.get(peerId);
+        if (dc && dc.readyState === 'open') {
+          try { dc.send(errorPayload); } catch (_) {}
+        }
+      } else {
+        dataChannels.current.forEach(dc => {
+          if (dc.readyState === 'open') {
+            try { dc.send(errorPayload); } catch (_) {}
+          }
+        });
+      }
+    }
+
+    addLog(`Transfer failed for "${targetFileName}": ${reason}`, "err");
+    await cleanupBuffersAndCache(targetFileName, peerId);
+  }, [addLog, cleanupBuffersAndCache]);
+
+  const handleCancelTransfer = useCallback(async () => {
+    const currentTransfer = transferRef.current;
+    const targetFileName = currentTransfer?.name || 'File';
+
+    cancelTransferRef.current = true;
+    setTransfer(null);
+
+    const cancelMsg = JSON.stringify({
+      type: 'transfer-failed',
+      fileName: targetFileName,
+      reason: 'Cancelled by user',
+      failedBy: currentTransfer?.type || 'user'
+    });
+
+    dataChannels.current.forEach(dc => {
+      if (dc.readyState === 'open') {
+        try { dc.send(cancelMsg); } catch(e) {}
+      }
+    });
+
+    addLog(`Transfer stopped / discarded for "${targetFileName}" - cached data cleared`, "err");
+    await cleanupBuffersAndCache(targetFileName);
+  }, [addLog, cleanupBuffersAndCache]);
 
   const [autoDownload, setAutoDownloadState] = useState(true);
   const autoDownloadRef = useRef(true);
@@ -287,7 +396,17 @@ export default function App() {
       }));
     };
 
+    channel.onerror = (err) => {
+      console.warn("RTCDataChannel transport error:", err);
+      if (transferRef.current) {
+        handleTransferFailure("WebRTC transport error", peerId, transferRef.current.name, false);
+      }
+    };
+
     channel.onclose = () => {
+      if (transferRef.current) {
+        handleTransferFailure("Peer connection lost during active transfer", peerId, transferRef.current.name, false);
+      }
       dataChannels.current.delete(peerId);
       const profId = peerIdToProfileId.current.get(peerId);
       peerIdToProfileId.current.delete(peerId);
@@ -317,7 +436,7 @@ export default function App() {
       peerConnections.current.delete(peerId);
     };
 
-    channel.onmessage = (event) => {
+    channel.onmessage = async (event) => {
       if (typeof event.data === 'string') {
         try {
           const data = JSON.parse(event.data);
@@ -487,6 +606,18 @@ export default function App() {
                 }
               });
             }
+          } else if (data.type === 'transfer-failed') {
+            const failReason = data.reason || 'Remote peer encountered an error';
+            const who = data.failedBy === 'sender' ? 'Sender' : data.failedBy === 'receiver' ? 'Receiver' : 'Peer';
+            addLog(`Transfer failed for "${data.fileName || 'file'}": ${failReason} (${who})`, "err");
+            cancelTransferRef.current = true;
+            setTransfer(null);
+            await cleanupBuffersAndCache(data.fileName, peerId);
+          } else if (data.type === 'transfer-cancel') {
+            addLog("Transfer cancelled by peer - temporary cache purged", "err");
+            cancelTransferRef.current = true;
+            setTransfer(null);
+            await cleanupBuffersAndCache(undefined, peerId);
           }
         } catch (e) {
           console.error("Failed to parse message", e);
@@ -505,14 +636,16 @@ export default function App() {
                   const chunk = buffer.chunks.shift();
                   await buffer.writable.write(chunk);
                 }
+                
+                if (buffer.receivedSize >= buffer.metadata.size && buffer.chunks.length === 0) {
+                  await buffer.writable.close();
+                  const blob = await buffer.fileHandle.getFile();
+                  finishFileReceive(buffer, blob);
+                }
+              } catch (writeErr: any) {
+                await handleTransferFailure(`Storage write failed: ${writeErr?.message || writeErr}`, peerId, buffer.metadata?.name, true);
               } finally {
                 buffer.isWriting = false;
-              }
-              
-              if (buffer.receivedSize >= buffer.metadata.size && buffer.chunks.length === 0) {
-                await buffer.writable.close();
-                const blob = await buffer.fileHandle.getFile();
-                finishFileReceive(buffer, blob);
               }
             })();
           }
@@ -536,10 +669,14 @@ export default function App() {
 
           if (!buffer.writable && buffer.receivedSize >= buffer.metadata.size && !buffer.isFinished) {
             buffer.isFinished = true;
-            triggerTransferAnimation();
-            const blob = new Blob(buffer.chunks, { type: buffer.metadata.mimeType });
-            buffer.chunks = [];
-            finishFileReceive(buffer, blob);
+            try {
+              triggerTransferAnimation();
+              const blob = new Blob(buffer.chunks, { type: buffer.metadata.mimeType });
+              buffer.chunks = [];
+              finishFileReceive(buffer, blob);
+            } catch (blobErr: any) {
+              await handleTransferFailure(`Payload assembly failed: ${blobErr?.message || blobErr}`, peerId, buffer.metadata?.name, true);
+            }
           }
         }
       }
@@ -593,8 +730,11 @@ export default function App() {
     peerConnections.current.set(id, pc);
     
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
         pc.close();
+        if (transferRef.current) {
+          handleTransferFailure("WebRTC peer connection lost", id, transferRef.current.name, false);
+        }
       }
     };
 
@@ -760,12 +900,14 @@ export default function App() {
 
     let offset = 0;
     cancelTransferRef.current = false;
+    let lastActiveChunkTime = Date.now();
 
     const startStreaming = () => {
       const sendNextChunk = async () => {
         if (cancelTransferRef.current) {
           addLog(`Transfer aborted for ${file.name}`, "info");
           setTransfer(null);
+          await cleanupBuffersAndCache(file.name);
           return;
         }
 
@@ -776,14 +918,27 @@ export default function App() {
           return;
         }
 
+        let openCount = 0;
         let maxBuffer = 0;
         dataChannels.current.forEach(dc => {
-          if (dc.readyState === 'open' && typeof dc.bufferedAmount === 'number') {
-            maxBuffer = Math.max(maxBuffer, dc.bufferedAmount);
+          if (dc.readyState === 'open') {
+            openCount++;
+            if (typeof dc.bufferedAmount === 'number') {
+              maxBuffer = Math.max(maxBuffer, dc.bufferedAmount);
+            }
           }
         });
 
+        if (openCount === 0 && !isSimulation) {
+          await handleTransferFailure("All peer connections disconnected during transfer", undefined, file.name, false);
+          return;
+        }
+
         if (maxBuffer > MAX_BUFFERED_AMOUNT) {
+          if (Date.now() - lastActiveChunkTime > 15000) {
+            await handleTransferFailure("Network stalled: peer buffer did not drain for >15s", undefined, file.name, true);
+            return;
+          }
           setTimeout(sendNextChunk, 25);
           return;
         }
@@ -793,7 +948,10 @@ export default function App() {
 
         try {
           const chunkData = await slice.arrayBuffer();
-          if (cancelTransferRef.current) return;
+          if (cancelTransferRef.current) {
+            await cleanupBuffersAndCache(file.name);
+            return;
+          }
 
           let anySent = false;
           dataChannels.current.forEach(dc => {
@@ -809,6 +967,7 @@ export default function App() {
 
           if (anySent) {
             offset += chunkData.byteLength;
+            lastActiveChunkTime = Date.now();
             const now = Date.now();
             if (now - lastUpdateRef.current > 150 || offset >= file.size) {
               const progress = Math.round((offset / file.size) * 100);
@@ -829,8 +988,7 @@ export default function App() {
             setTimeout(() => setTransfer(null), 1000);
           }
         } catch (sliceErr: any) {
-          addLog(`File read error during transfer of ${file.name}: ${sliceErr?.message || sliceErr}`, "err");
-          setTransfer(null);
+          await handleTransferFailure(`File read error during transfer: ${sliceErr?.message || sliceErr}`, undefined, file.name, true);
         }
       };
 
