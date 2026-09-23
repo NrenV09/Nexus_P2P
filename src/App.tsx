@@ -739,12 +739,66 @@ export default function App() {
            id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
            name: "Simulation_Report.txt",
            size: 1024 * 3,
+           mimeType: 'text/plain',
            timestamp: new Date(),
            direction: 'in',
            senderName: "Beta (Sim)",
            senderColor: "bg-purple-500",
            senderId: "sim_peer_2",
-           blob: new Blob(['=== QUANTUM LINK SIMULATION REPORT ===\n\nNetwork Status: SECURED\nNodes Connected: 2\nLatency: 12ms\nPacket Loss: 0.00%\n\nSimulation metrics indicate optimal performance.'], { type: 'text/plain' })
+           blob: new Blob(['=== QUANTUM LINK SIMULATION REPORT ===\n\nNetwork Status: SECURED\nNodes Connected: 4\nLatency: 12ms\nPacket Loss: 0.00%\nChannel Isolations: [nexus-chat], [nexus-file-transfer]\nDynamic Renegotiation: STABLE\n\nSimulation metrics indicate optimal multiplexing performance.'], { type: 'text/plain' })
+        },
+        {
+           id: (Math.random().toString(36).substring(2) + (Date.now() + 1).toString(36)),
+           name: "network_mesh_topology.svg",
+           size: 1024 * 2,
+           mimeType: 'image/svg+xml',
+           timestamp: new Date(Date.now() - 30000),
+           direction: 'in',
+           senderName: "Alpha (Sim)",
+           senderColor: "bg-blue-500",
+           senderId: "sim_peer_1",
+           blob: new Blob([`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="100%" height="100%">
+  <defs>
+    <radialGradient id="grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="1"/>
+    </radialGradient>
+  </defs>
+  <rect width="400" height="300" fill="url(#grad)" rx="16"/>
+  <line x1="200" y1="150" x2="100" y2="80" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4"/>
+  <line x1="200" y1="150" x2="300" y2="80" stroke="#10b981" stroke-width="3"/>
+  <line x1="200" y1="150" x2="200" y2="240" stroke="#f43f5e" stroke-width="2.5"/>
+  <circle cx="200" cy="150" r="28" fill="#0284c7" stroke="#38bdf8" stroke-width="3"/>
+  <text x="200" y="155" fill="#ffffff" font-family="monospace" font-size="12" font-weight="bold" text-anchor="middle">YOU</text>
+  <circle cx="100" cy="80" r="20" fill="#6366f1" stroke="#818cf8" stroke-width="2"/>
+  <text x="100" y="84" fill="#ffffff" font-family="monospace" font-size="10" text-anchor="middle">HOST</text>
+  <circle cx="300" cy="80" r="20" fill="#059669" stroke="#34d399" stroke-width="2"/>
+  <text x="300" y="84" fill="#ffffff" font-family="monospace" font-size="10" text-anchor="middle">PEER</text>
+  <circle cx="200" cy="240" r="20" fill="#e11d48" stroke="#fb7185" stroke-width="2"/>
+  <text x="200" y="244" fill="#ffffff" font-family="monospace" font-size="10" text-anchor="middle">EDGE</text>
+</svg>`], { type: 'image/svg+xml' })
+        },
+        {
+           id: (Math.random().toString(36).substring(2) + (Date.now() + 2).toString(36)),
+           name: "telemetry_matrix.json",
+           size: 1024 * 1,
+           mimeType: 'application/json',
+           timestamp: new Date(Date.now() - 60000),
+           direction: 'in',
+           senderName: "Beta (Sim)",
+           senderColor: "bg-purple-500",
+           senderId: "sim_peer_2",
+           blob: new Blob([JSON.stringify({
+             nexusProtocol: "2.0-MULTIPLEXED",
+             meshTopology: "DYNAMIC_P2P_BYPASS",
+             channels: {
+               chat: { label: "nexus-chat", ordered: true, status: "OPEN" },
+               fileTransfer: { label: "nexus-file-transfer", backpressure: "SCTP_DRAIN", status: "OPEN" },
+               mediaAV: { renegotiation: "PERFECT_NEGOTIATION", dynamicTracks: true }
+             },
+             virtualPeers: ["Atlas-Prime", "Vortex-9", "Cyber-Echo", "Nova-Core"],
+             timestamp: new Date().toISOString()
+           }, null, 2)], { type: 'application/json' })
         }
       ]);
 
@@ -2804,6 +2858,7 @@ export default function App() {
                 localAvatarColor={profile.avatarColor}
                 localPeerId={profile.id}
                 roomId="nexus-main"
+                isSimulation={isSimulation}
                 onFileReceived={(file, fromPeer) => {
                   setFiles(prev => [{
                     id: Math.random().toString(36).substring(2) + Date.now().toString(36),

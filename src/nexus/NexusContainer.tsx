@@ -15,7 +15,11 @@ import {
   Layers,
   CheckCircle2,
   AlertCircle,
-  X
+  X,
+  UserPlus,
+  PlayCircle,
+  Sliders,
+  Sparkles
 } from 'lucide-react';
 
 interface NexusContainerProps {
@@ -23,6 +27,7 @@ interface NexusContainerProps {
   localAvatarColor?: string;
   localPeerId?: string;
   roomId?: string;
+  isSimulation?: boolean;
   onFileReceived?: (file: File, fromPeer: NexusPeer) => void;
 }
 
@@ -31,6 +36,7 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
   localAvatarColor,
   localPeerId,
   roomId = 'nexus-main',
+  isSimulation: isSimulationProp,
   onFileReceived
 }) => {
   const {
@@ -38,6 +44,11 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
     peers,
     hostId,
     wsConnected,
+    isSimulation,
+    setSimulationMode,
+    simulateAddPeer,
+    simulateIncomingCall,
+    simulateIncomingBatch,
     activeTransfers,
     activeBatches,
     concurrentPeerStates,
@@ -55,6 +66,7 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
     username: localUsername,
     avatarColor: localAvatarColor,
     peerId: localPeerId,
+    isSimulation: isSimulationProp,
     onFileReceived
   });
 
@@ -91,18 +103,25 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
     setDirectChatMessage('');
   };
 
+  // Trigger quick test batch
+  const handleSendTestBatch = (targetPeerId: string) => {
+    const file1 = new File(['Telemetry frame data block for orbital satellite simulation.'], 'satellite_telemetry.bin', { type: 'application/octet-stream' });
+    const file2 = new File(['Nexus decentralized key exchange specification v2.'], 'nexus_spec.pdf', { type: 'application/pdf' });
+    sendBatch(targetPeerId, [file1, file2]);
+  };
+
   // Convert batches Map to Array
   const batchList: BatchTransferState[] = Array.from(activeBatches.values());
 
   return (
-    <div className="flex flex-col h-full w-full gap-4 overflow-hidden p-2 lg:p-4">
+    <div className="flex flex-col h-full w-full gap-3 overflow-hidden p-2 lg:p-4">
       {/* Top Banner Status */}
-      <div className="flex items-center justify-between bg-black/40 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 shadow-sm flex-wrap gap-2">
+      <div className="flex items-center justify-between bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 shadow-sm flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${wsConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+            <span className={`w-2.5 h-2.5 rounded-full ${isSimulation ? 'bg-emerald-400 animate-pulse' : wsConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
             <span className="text-xs font-semibold text-white">
-              {wsConnected ? 'Signaling Hub Connected' : 'Connecting...'}
+              {isSimulation ? 'Simulation Mode Active' : wsConnected ? 'Signaling Hub Connected' : 'Connecting...'}
             </span>
           </div>
           <span className="text-slate-500">|</span>
@@ -119,24 +138,73 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400 font-mono">
+        {/* Action Controls & Simulation Toggle */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setSimulationMode(!isSimulation)}
+            className={`text-xs px-3 py-1 rounded-xl font-medium transition-all flex items-center gap-1.5 cursor-pointer border ${
+              isSimulation
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                : 'bg-white/10 text-slate-300 border-white/10 hover:bg-white/20'
+            }`}
+            title="Toggle between Live WebRTC Signaling and Interactive Simulation Mode"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Simulation: <strong className={isSimulation ? 'text-emerald-300' : 'text-slate-400'}>{isSimulation ? 'ON' : 'OFF'}</strong></span>
+          </button>
+
+          <span className="text-xs text-slate-400 font-mono hidden sm:inline">
             Mesh Peers: <strong className="text-white">{peers.size}</strong>
           </span>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/10 text-emerald-300 border border-white/5 flex items-center gap-1">
-              <Zap className="w-3 h-3 text-emerald-400" />
-              SCTP Multiplexing Active
-            </span>
+
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white/10 text-emerald-300 border border-white/5 hidden md:flex items-center gap-1">
+            <Zap className="w-3 h-3 text-emerald-400" />
+            SCTP Active
+          </span>
+
+          <button
+            onClick={() => sendMessage(`Ping from ${localPeer.username}`)}
+            className="text-[11px] px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium transition-colors cursor-pointer"
+          >
+            Broadcast Ping
+          </button>
+        </div>
+      </div>
+
+      {/* Simulation Mode Quick Action Bar */}
+      {isSimulation && (
+        <div className="flex items-center justify-between bg-emerald-950/30 border border-emerald-500/25 px-4 py-2 rounded-2xl text-xs text-emerald-300 backdrop-blur-md flex-wrap gap-2 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="font-semibold text-white">Interactive Simulation Sandbox</span>
+            <span className="text-slate-400 text-[11px] hidden sm:inline">— Drag nodes directly with touch, test file batches, and initiate simulated calls!</span>
+          </div>
+
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => sendMessage(`Ping from ${localPeer.username}`)}
-              className="text-[11px] px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium transition-colors cursor-pointer"
+              onClick={() => simulateAddPeer()}
+              className="px-2.5 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-medium transition-colors flex items-center gap-1.5 cursor-pointer border border-emerald-500/30 text-[11px]"
             >
-              Broadcast Ping
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>+ Add Peer</span>
+            </button>
+            <button
+              onClick={() => simulateIncomingCall('sim-vortex', 'video')}
+              className="px-2.5 py-1 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-medium transition-colors flex items-center gap-1.5 cursor-pointer border border-rose-500/30 text-[11px]"
+            >
+              <Video className="w-3.5 h-3.5" />
+              <span>Simulate Call</span>
+            </button>
+            <button
+              onClick={() => simulateIncomingBatch('sim-atlas')}
+              className="px-2.5 py-1 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 font-medium transition-colors flex items-center gap-1.5 cursor-pointer border border-purple-500/30 text-[11px]"
+            >
+              <Package className="w-3.5 h-3.5" />
+              <span>Simulate Batch</span>
             </button>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Main Split Grid: Dynamic Network Map (Left/Center) + Global Event Log (Right) */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0 overflow-hidden">
@@ -180,43 +248,35 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
                       </span>
                     </div>
 
-                    <div className="text-[11px] text-slate-300 truncate font-mono">
-                      File ({b.currentFileIndex + 1}/{b.totalFiles}): {b.currentFileName}
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
+                    <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                       <div
-                        className="h-full bg-emerald-500 transition-all duration-200"
+                        className="bg-emerald-500 h-full transition-all duration-150 shadow-[0_0_8px_#10B981]"
                         style={{ width: `${b.progress}%` }}
                       />
                     </div>
 
-                    <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono">
-                      <span>Status: <strong className="text-white capitalize">{b.status}</strong></span>
-                      <span className="text-accent">{b.speed}</span>
+                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                      <span>{b.speed || 'Calculating...'}</span>
+                      <span>{b.files.length} files ({b.status})</span>
+                      <button
+                        onClick={() => cancelBatch(b.targetId, b.batchId)}
+                        className="text-red-400 hover:text-red-300 font-bold cursor-pointer"
+                      >
+                        Cancel
+                      </button>
                     </div>
 
-                    {/* File Checklist */}
-                    <div className="pt-1 border-t border-white/10 space-y-1 max-h-24 overflow-y-auto">
+                    {/* Nested individual file progress */}
+                    <div className="pt-1 space-y-1 border-t border-white/5">
                       {b.files.map((file, idx) => (
-                        <div key={idx} className="flex items-center justify-between text-[9px] text-slate-400">
-                          <span className="truncate max-w-[150px]">{file.name}</span>
-                          <span className={file.status === 'completed' ? 'text-emerald-400' : file.status === 'transferring' ? 'text-accent animate-pulse' : 'text-slate-500'}>
-                            {file.status === 'completed' ? '✓' : `${file.progress}%`}
+                        <div key={idx} className="flex items-center justify-between text-[10px] text-slate-300">
+                          <span className="truncate max-w-[190px]">{file.name}</span>
+                          <span className={file.status === 'completed' ? 'text-emerald-400' : 'text-slate-500'}>
+                            {file.status === 'completed' ? 'Done' : `${file.progress}%`}
                           </span>
                         </div>
                       ))}
                     </div>
-
-                    {b.status === 'streaming' && (
-                      <button
-                        onClick={() => cancelBatch(b.targetId, b.batchId)}
-                        className="w-full mt-1 py-1 text-[10px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded border border-rose-500/30 cursor-pointer"
-                      >
-                        Cancel Batch
-                      </button>
-                    )}
                   </div>
                 ))}
               </div>
@@ -224,7 +284,7 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
           )}
         </div>
 
-        {/* Global Event & Message Log Section */}
+        {/* Global Event & Multiplexed Message Log Section */}
         <div className="col-span-1 lg:col-span-5 xl:col-span-4 flex flex-col h-full min-h-[380px]">
           <GlobalLog
             logs={logs}
@@ -234,19 +294,19 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
         </div>
       </div>
 
-      {/* Selected Peer Action Modal / Dynamic Control Panel */}
-      {selectedPeer && selectedPeer.id !== localPeer.id && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+      {/* Peer Action & Direct Transfer Modal (Triggered by clicking/tapping node) */}
+      {selectedPeer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
           <div className="bg-slate-900 border border-white/20 p-5 rounded-3xl shadow-2xl max-w-md w-full space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-accent flex items-center justify-center text-white font-bold text-base shadow-md">
-                  {selectedPeer.username.charAt(0).toUpperCase()}
+                <div className={`w-10 h-10 rounded-2xl ${selectedPeer.avatarColor} flex items-center justify-center text-white font-bold text-base shadow-lg`}>
+                  {(selectedPeer.username || 'P').charAt(0).toUpperCase()}
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-white flex items-center gap-2">
                     {selectedPeer.username}
-                    {selectedPeer.id === hostId && (
+                    {selectedPeer.isHost && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
                         HOST
                       </span>
@@ -326,7 +386,19 @@ export const NexusContainer: React.FC<NexusContainerProps> = ({
 
             {/* Multi-file Batch Transmission Drop Area */}
             <div className="space-y-1.5">
-              <label className="text-[11px] text-slate-400 font-medium">Batched File Transfer (Manifest Handshake):</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-slate-400 font-medium">Batched File Transfer:</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSendTestBatch(selectedPeer.id);
+                    setSelectedPeer(null);
+                  }}
+                  className="text-[10px] text-emerald-400 hover:underline cursor-pointer"
+                >
+                  ⚡ Send Test Batch (2 files)
+                </button>
+              </div>
               <label className="border-2 border-dashed border-white/20 hover:border-emerald-500 p-4 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-colors text-center bg-white/[0.02]">
                 <input
                   type="file"
