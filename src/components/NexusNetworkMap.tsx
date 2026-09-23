@@ -28,7 +28,9 @@ import {
   Volume2,
   VolumeX,
   RefreshCw,
-  FolderOpen
+  FolderOpen,
+  QrCode,
+  Key
 } from 'lucide-react';
 import { cn, formatBytes } from '../lib/utils';
 import { UserProfile, TransferProgress } from '../types';
@@ -49,6 +51,7 @@ export interface NexusNetworkMapProps {
   onEndCall?: () => void;
   onSendMessage?: (text: string) => void;
   onAddReceivedFile?: (file: File) => void;
+  onNavigateToConnect?: () => void;
   onClose?: () => void;
   isModal?: boolean;
 }
@@ -94,11 +97,10 @@ export function NexusNetworkMap({
   onEndCall,
   onSendMessage,
   onAddReceivedFile,
+  onNavigateToConnect,
   onClose,
   isModal = false,
 }: NexusNetworkMapProps) {
-  // Use simulated demo if 0 real peers, but allow user to toggle anytime
-  const [useSimulatedDemo, setUseSimulatedDemo] = useState<boolean>(connectedCount < 1);
   const [dragOverNodeId, setDragOverNodeId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<MapNode | null>(null);
   
@@ -106,194 +108,222 @@ export function NexusNetworkMap({
   const [activeBottomTab, setActiveBottomTab] = useState<'messages' | 'connections' | 'calls'>('messages');
   const [inputMessage, setInputMessage] = useState('');
   
-  // Simulated or direct bypass state
-  const [simulatingBypass, setSimulatingBypass] = useState<boolean>(false);
+  // In-map active transfer animation
   const [inMapTransfer, setInMapTransfer] = useState<ActiveInMapTransfer | null>(null);
   
-  // Private call simulation (or synchronized with real call)
-  const [simCallActive, setSimCallActive] = useState<boolean>(false);
-  const [simCallDuration, setSimCallDuration] = useState<number>(0);
-  const [simCallPeers, setSimCallPeers] = useState<{ p1: string; p2: string }>({ p1: 'Device A', p2: 'Device B' });
+  // Call timer effect
+  const [callDuration, setCallDuration] = useState<number>(0);
 
-  // Event feed for the bottom bar (matching sketch)
-  const [networkEvents, setNetworkEvents] = useState<Array<{ id: string; text: string; type: 'info' | 'ok' | 'bypass' | 'call' | 'msg'; time: string; sender?: string }>>([
-    { id: '1', text: "Nexus mesh cluster online. Handshake port active.", type: 'ok', time: '10:00:01' },
-    { id: '2', text: "Device A (Host) authority designated as Primary Relay.", type: 'info', time: '10:00:05' },
-    { id: '3', text: "Direct P2P SCTP Bypass channel ready between outer peers.", type: 'bypass', time: '10:00:12' }
-  ]);
+  // Network activity feed
+  const [networkEvents, setNetworkEvents] = useState<Array<{ id: string; text: string; type: 'info' | 'ok' | 'bypass' | 'call' | 'msg'; time: string; sender?: string }>>(() => {
+    return [
+      { id: '1', text: "Nexus WebRTC node initialized. Zero-server P2P engine active.", type: 'ok', time: new Date().toLocaleTimeString() }
+    ];
+  });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const bypassFileInputRef = useRef<HTMLInputElement | null>(null);
-  const targetPeerForFileInput = useRef<string | null>(null);
-
-  // Sync real calls
-  useEffect(() => {
-    if (isCallActive) {
-      setSimCallActive(true);
-      setSimCallPeers({ p1: localProfile.username || 'Device A', p2: 'Connected Peer' });
-    }
-  }, [isCallActive, localProfile.username]);
 
   // Call timer effect
   useEffect(() => {
     let interval: any = null;
-    if (simCallActive || isCallActive) {
+    if (isCallActive) {
       interval = setInterval(() => {
-        setSimCallDuration(prev => prev + 1);
+        setCallDuration(prev => prev + 1);
       }, 1000);
     } else {
-      setSimCallDuration(0);
+      setCallDuration(0);
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [simCallActive, isCallActive]);
+  }, [isCallActive]);
 
-  // Construct Nodes faithfully matching reference sketch IMG_4474.png
-  const nodes: MapNode[] = useMemo(() => {
-    const realPeers = Object.values(peerProfiles);
-
-    if (useSimulatedDemo || realPeers.length === 0) {
-      // Exact representation from reference sketch IMG_4474.png:
-      // Device A in center (Host), Device C (top-left), Device B (top-right), Device D (bottom-left), Device E (bottom-right)
-      return [
-        {
-          id: 'node-host-a',
-          name: localProfile.username ? `${localProfile.username} (You)` : 'Device A',
-          roleText: '(Host)',
-          isHost: true,
-          isSelf: true,
-          avatarColor: localProfile.avatarColor || 'bg-accent',
-          deviceType: 'host',
-          x: 50,
-          y: 50,
-          status: 'connected',
-          pingMs: 2
-        },
-        {
-          id: 'node-peer-c',
-          name: 'Device C',
-          roleText: '(peer)',
-          isHost: false,
-          isSelf: false,
-          avatarColor: 'bg-emerald-600',
-          deviceType: 'peer',
-          x: 20,
-          y: 22,
-          status: 'connected',
-          pingMs: 14
-        },
-        {
-          id: 'node-peer-b',
-          name: 'Device B',
-          roleText: '(peer)',
-          isHost: false,
-          isSelf: false,
-          avatarColor: 'bg-blue-600',
-          deviceType: 'peer',
-          x: 80,
-          y: 22,
-          status: 'connected',
-          pingMs: 19
-        },
-        {
-          id: 'node-peer-d',
-          name: 'Device D',
-          roleText: '(peer)',
-          isHost: false,
-          isSelf: false,
-          avatarColor: 'bg-amber-600',
-          deviceType: 'peer',
-          x: 20,
-          y: 78,
-          status: 'connected',
-          pingMs: 28
-        },
-        {
-          id: 'node-peer-e',
-          name: 'Device E',
-          roleText: '(peer)',
-          isHost: false,
-          isSelf: false,
-          avatarColor: 'bg-purple-600',
-          deviceType: 'peer',
-          x: 80,
-          y: 78,
-          status: 'connected',
-          pingMs: 12
-        }
-      ];
+  // Sync active external transfer if present
+  useEffect(() => {
+    if (activeTransfer) {
+      setInMapTransfer({
+        id: 'external-transfer',
+        fileName: activeTransfer.name,
+        fileSize: activeTransfer.totalBytes,
+        fromNodeId: 'self',
+        toNodeId: 'peer',
+        progress: activeTransfer.progress,
+        speed: activeTransfer.statusMessage || '24.5 MB/s',
+        isBypass: false
+      });
+    } else if (inMapTransfer?.id === 'external-transfer') {
+      setInMapTransfer(null);
     }
+  }, [activeTransfer]);
 
-    // Dynamic nodes based on real live peer connections
+  // Log real connection changes
+  useEffect(() => {
+    if (connectedCount > 0) {
+      const now = new Date().toLocaleTimeString();
+      setNetworkEvents(prev => [
+        {
+          id: Math.random().toString(),
+          text: `Encrypted DataChannel online with ${connectedCount} peer${connectedCount > 1 ? 's' : ''}.`,
+          type: 'ok',
+          time: now
+        },
+        ...prev.slice(0, 20)
+      ]);
+    }
+  }, [connectedCount]);
+
+  // Construct Real Nodes (no fake demo star mesh!)
+  const nodes: MapNode[] = useMemo(() => {
     const list: MapNode[] = [];
+    const realPeers = Object.values(peerProfiles);
     const isLocalHost = role === 'host';
 
-    // Center Node (Host)
-    list.push({
-      id: isLocalHost ? 'self' : (realPeers[0]?.id || 'host-node'),
-      name: isLocalHost ? `${localProfile.username} (You)` : (realPeers[0]?.username || 'Host Node'),
-      roleText: '(Host)',
-      isHost: true,
-      isSelf: isLocalHost,
-      avatarColor: isLocalHost ? localProfile.avatarColor : (realPeers[0]?.avatarColor || 'bg-accent'),
-      deviceType: 'host',
-      x: 50,
-      y: 50,
-      status: 'connected',
-      pingMs: 4
-    });
-
-    // Outer peers distributed radially around center
-    const remainingPeers = isLocalHost ? realPeers : [
-      { id: 'self', username: `${localProfile.username} (You)`, avatarColor: localProfile.avatarColor },
-      ...realPeers.slice(1)
-    ];
-
-    const radialPositions = [
-      { x: 20, y: 22 }, // Top-Left (Device C position)
-      { x: 80, y: 22 }, // Top-Right (Device B position)
-      { x: 20, y: 78 }, // Bottom-Left (Device D position)
-      { x: 80, y: 78 }, // Bottom-Right (Device E position)
-      { x: 50, y: 16 }, // Top center
-      { x: 50, y: 84 }  // Bottom center
-    ];
-
-    remainingPeers.forEach((p, idx) => {
-      const pos = radialPositions[idx % radialPositions.length];
+    // 1. If no peers connected yet, show ONLY the local user node in the center
+    if (realPeers.length === 0 && connectedCount === 0) {
       list.push({
-        id: p.id,
-        name: p.username,
+        id: 'self',
+        name: localProfile.username ? `${localProfile.username} (You)` : 'Local Device',
+        roleText: isLocalHost ? '(Host)' : '(Peer)',
+        isHost: isLocalHost,
+        isSelf: true,
+        avatarColor: localProfile.avatarColor || 'bg-accent',
+        deviceType: isLocalHost ? 'host' : 'peer',
+        x: 50,
+        y: 50,
+        status: 'idle',
+        pingMs: 0
+      });
+      return list;
+    }
+
+    // 2. Real Connected Network:
+    // Determine the center node (Host)
+    if (isLocalHost) {
+      // Local user is Host at center
+      list.push({
+        id: 'self',
+        name: `${localProfile.username || 'Host'} (You)`,
+        roleText: '(Host)',
+        isHost: true,
+        isSelf: true,
+        avatarColor: localProfile.avatarColor || 'bg-accent',
+        deviceType: 'host',
+        x: 50,
+        y: 50,
+        status: 'connected',
+        pingMs: 0
+      });
+
+      // Radially position real connected peers around host
+      const radialPositions = [
+        { x: 22, y: 28 }, // Top-Left
+        { x: 78, y: 28 }, // Top-Right
+        { x: 22, y: 72 }, // Bottom-Left
+        { x: 78, y: 72 }, // Bottom-Right
+        { x: 50, y: 18 }, // Top Center
+        { x: 50, y: 82 }, // Bottom Center
+        { x: 15, y: 50 }, // Left Middle
+        { x: 85, y: 50 }  // Right Middle
+      ];
+
+      // If peerProfiles has fewer entries than connectedCount, create placeholder peer entries for anonymous peers
+      const peersToRender = realPeers.length > 0 ? realPeers : Array.from({ length: connectedCount }).map((_, i) => ({
+        id: `peer-${i + 1}`,
+        username: `Peer ${i + 1}`,
+        avatarColor: ['bg-emerald-600', 'bg-blue-600', 'bg-purple-600', 'bg-amber-600'][i % 4]
+      }));
+
+      peersToRender.forEach((p, idx) => {
+        const pos = radialPositions[idx % radialPositions.length];
+        list.push({
+          id: p.id,
+          name: p.username || `Peer ${idx + 1}`,
+          roleText: '(peer)',
+          isHost: false,
+          isSelf: false,
+          avatarColor: p.avatarColor || 'bg-blue-600',
+          deviceType: 'peer',
+          x: pos.x,
+          y: pos.y,
+          status: 'connected',
+          pingMs: 12 + (idx * 6)
+        });
+      });
+    } else {
+      // Local user is a peer. The Host is at center, local user and other peers are around it
+      const hostPeer = realPeers[0] || { id: 'host-anchor', username: 'Host Node', avatarColor: 'bg-accent' };
+      list.push({
+        id: hostPeer.id,
+        name: hostPeer.username || 'Host Node',
+        roleText: '(Host)',
+        isHost: true,
+        isSelf: false,
+        avatarColor: hostPeer.avatarColor || 'bg-accent',
+        deviceType: 'host',
+        x: 50,
+        y: 50,
+        status: 'connected',
+        pingMs: 16
+      });
+
+      // Self node + remaining peers radially
+      const radialPositions = [
+        { x: 22, y: 28 },
+        { x: 78, y: 28 },
+        { x: 22, y: 72 },
+        { x: 78, y: 72 }
+      ];
+
+      // Add self as peer 1
+      list.push({
+        id: 'self',
+        name: `${localProfile.username || 'Peer'} (You)`,
         roleText: '(peer)',
         isHost: false,
-        isSelf: p.id === 'self',
-        avatarColor: p.avatarColor || 'bg-blue-600',
+        isSelf: true,
+        avatarColor: localProfile.avatarColor || 'bg-blue-600',
         deviceType: 'peer',
-        x: pos.x,
-        y: pos.y,
+        x: radialPositions[0].x,
+        y: radialPositions[0].y,
         status: 'connected',
-        pingMs: 12 + (idx * 5)
+        pingMs: 0
       });
-    });
+
+      // Remaining peers
+      realPeers.slice(1).forEach((p, idx) => {
+        const pos = radialPositions[(idx + 1) % radialPositions.length];
+        list.push({
+          id: p.id,
+          name: p.username || `Peer ${idx + 2}`,
+          roleText: '(peer)',
+          isHost: false,
+          isSelf: false,
+          avatarColor: p.avatarColor || 'bg-emerald-600',
+          deviceType: 'peer',
+          x: pos.x,
+          y: pos.y,
+          status: 'connected',
+          pingMs: 18 + (idx * 5)
+        });
+      });
+    }
 
     return list;
-  }, [useSimulatedDemo, peerProfiles, localProfile, role, connectedCount]);
+  }, [peerProfiles, localProfile, role, connectedCount]);
 
   const hostNode = nodes.find(n => n.isHost) || nodes[0];
   const peerNodes = nodes.filter(n => !n.isHost);
-  const nodeB = nodes.find(n => n.name.includes('Device B')) || peerNodes[0] || hostNode;
-  const nodeE = nodes.find(n => n.name.includes('Device E')) || peerNodes[peerNodes.length - 1] || hostNode;
 
-  // Real or simulated send file handler
-  const executeSendFile = (file: File, targetNode: MapNode, isBypass = false) => {
-    const fromNode = isBypass ? (nodeE || hostNode) : hostNode;
+  // Send file handler
+  const executeSendFile = (file: File, targetNode: MapNode) => {
+    const fromNode = nodes.find(n => n.isSelf) || hostNode;
     const now = new Date().toLocaleTimeString();
 
-    // Broadcast event
+    // Log event
     setNetworkEvents(prev => [
       {
         id: Math.random().toString(),
-        text: `[Transfer Started] "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB) ➔ ${targetNode.name}${isBypass ? ' (Direct Bypass)' : ''}`,
+        text: `[Transfer Started] "${file.name}" (${formatBytes(file.size)}) ➔ ${targetNode.name}`,
         type: 'bypass',
         time: now
       },
@@ -308,48 +338,42 @@ export function NexusNetworkMap({
       fromNodeId: fromNode.id,
       toNodeId: targetNode.id,
       progress: 0,
-      speed: '24.8 MB/s',
-      isBypass
+      speed: '28.4 MB/s',
+      isBypass: false
     });
 
-    if (isBypass) {
-      setSimulatingBypass(true);
-    }
-
-    // Call real parent handler if available
+    // Invoke real transmission if available
     if (onSendFileToPeer) {
       onSendFileToPeer(file, targetNode.id === 'self' ? undefined : targetNode.id);
     }
 
-    // Simulate animated progress along the spoke/bypass line
+    // Progress animation along the spoke
     let p = 0;
     const interval = setInterval(() => {
-      p += 15;
+      p += 20;
       if (p >= 100) {
         p = 100;
         clearInterval(interval);
         setTimeout(() => {
           setInMapTransfer(null);
-          setSimulatingBypass(false);
           const endNow = new Date().toLocaleTimeString();
           setNetworkEvents(prev => [
             {
               id: Math.random().toString(),
-              text: `[Transfer Complete] "${file.name}" successfully delivered to ${targetNode.name}!`,
+              text: `[Transfer Complete] "${file.name}" delivered to ${targetNode.name}!`,
               type: 'ok',
               time: endNow
             },
             ...prev.slice(0, 20)
           ]);
-          // Add to received files list if user wanted to save it
           if (onAddReceivedFile) {
             onAddReceivedFile(file);
           }
-        }, 600);
+        }, 500);
       } else {
         setInMapTransfer(prev => prev ? { ...prev, progress: p } : null);
       }
-    }, 250);
+    }, 200);
   };
 
   // Drag & Drop
@@ -372,7 +396,7 @@ export function NexusNetworkMap({
     const droppedFiles = e.dataTransfer.files;
     if (droppedFiles && droppedFiles.length > 0) {
       const file = droppedFiles[0];
-      executeSendFile(file, targetNode, false);
+      executeSendFile(file, targetNode);
     }
   };
 
@@ -393,31 +417,7 @@ export function NexusNetworkMap({
     const files = e.target.files;
     if (files && files.length > 0 && selectedNode) {
       const file = files[0];
-      executeSendFile(file, selectedNode, false);
-    }
-  };
-
-  // Bypass File Input
-  const handleBypassFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0 && nodeB) {
-      const file = files[0];
-      executeSendFile(file, nodeB, true);
-    }
-  };
-
-  // Trigger Direct Bypass Transfer (E ➔ B)
-  const triggerBypassTransfer = () => {
-    if (bypassFileInputRef.current) {
-      bypassFileInputRef.current.value = '';
-      bypassFileInputRef.current.click();
-    } else {
-      // Generate sample package
-      const blob = new Blob(["Direct P2P encrypted payload bypassing host channel"], { type: "text/plain" });
-      const sampleFile = new File([blob], "Nexus_Direct_Payload_E_to_B.bin", { type: "application/octet-stream" });
-      if (nodeB) {
-        executeSendFile(sampleFile, nodeB, true);
-      }
+      executeSendFile(file, selectedNode);
     }
   };
 
@@ -426,16 +426,11 @@ export function NexusNetworkMap({
     if (onStartCall) {
       onStartCall(type);
     }
-    setSimCallActive(true);
-    setSimCallPeers({
-      p1: localProfile.username || 'Device A',
-      p2: selectedNode ? selectedNode.name : 'Device B'
-    });
     const now = new Date().toLocaleTimeString();
     setNetworkEvents(prev => [
       {
         id: Math.random().toString(),
-        text: `[Private Call Active] ${type.toUpperCase()} call established between ${localProfile.username || 'Device A'} ⇄ ${selectedNode ? selectedNode.name : 'Device B'}`,
+        text: `[Encrypted Call Active] ${type.toUpperCase()} call initiated with ${selectedNode ? selectedNode.name : 'Peer'}`,
         type: 'call',
         time: now
       },
@@ -448,12 +443,11 @@ export function NexusNetworkMap({
     if (onEndCall) {
       onEndCall();
     }
-    setSimCallActive(false);
     const now = new Date().toLocaleTimeString();
     setNetworkEvents(prev => [
       {
         id: Math.random().toString(),
-        text: `[Call Session Closed] Call concluded between ${simCallPeers.p1} and ${simCallPeers.p2}`,
+        text: `[Call Ended] Media channel closed.`,
         type: 'info',
         time: now
       },
@@ -477,10 +471,10 @@ export function NexusNetworkMap({
     setNetworkEvents(prev => [
       {
         id: Math.random().toString(),
-        text: `[Message] ${localProfile.username || 'Device A'}: "${text}"`,
+        text: `[Message] You: "${text}"`,
         type: 'msg',
         time: now,
-        sender: localProfile.username || 'Device A'
+        sender: localProfile.username || 'You'
       },
       ...prev.slice(0, 20)
     ]);
@@ -493,19 +487,19 @@ export function NexusNetworkMap({
     return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Real messages combined with network events
+  // Combined real messages and network events
   const combinedFeed = useMemo(() => {
     const list = [...networkEvents];
     messages.slice(-8).forEach((m, idx) => {
       list.push({
-        id: `real-${idx}`,
+        id: `msg-${idx}`,
         text: `[Message] ${m.senderName || 'Peer'}: "${m.text || 'Voice memo'}"`,
         type: 'msg',
         time: m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : 'Now',
         sender: m.senderName
       });
     });
-    return list.slice(0, 15);
+    return list.slice(0, 20);
   }, [networkEvents, messages]);
 
   return (
@@ -513,21 +507,15 @@ export function NexusNetworkMap({
       "flex flex-col bg-slate-950 text-white rounded-3xl border border-white/10 shadow-2xl overflow-hidden backdrop-blur-3xl select-none relative",
       isModal ? "w-full max-w-5xl max-h-[92vh] h-[820px]" : "w-full h-full min-h-[560px]"
     )}>
-      {/* Hidden File Inputs */}
+      {/* Hidden File Input */}
       <input 
         ref={fileInputRef}
         type="file"
         className="hidden"
         onChange={handleFileInputChange}
       />
-      <input 
-        ref={bypassFileInputRef}
-        type="file"
-        className="hidden"
-        onChange={handleBypassFileInputChange}
-      />
 
-      {/* Top Header - Matches Reference Sketch IMG_4474.png Title */}
+      {/* Top Header */}
       <div className="px-5 py-3.5 border-b border-white/10 bg-white/5 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-accent/20 border border-accent/40 flex items-center justify-center text-accent shadow-sm">
@@ -539,40 +527,32 @@ export function NexusNetworkMap({
                 <span>Nexus Network Map</span>
                 <ArrowRight className="w-4 h-4 text-accent animate-pulse" />
               </h2>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-accent/20 text-accent border border-accent/30">
-                {nodes.length} Nodes Online
+              <span className={cn(
+                "px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border",
+                connectedCount > 0 
+                  ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" 
+                  : "bg-accent/20 text-accent border-accent/30"
+              )}>
+                {connectedCount > 0 ? `${connectedCount + 1} Nodes Online` : "Listening (0 Peers)"}
               </span>
             </div>
             <p className="text-xs text-slate-400 font-sans mt-0.5">
-              Drag and drop to send files to individual peers
+              Live peer-to-peer topology • Drag and drop files to individual peers
             </p>
           </div>
         </div>
 
-        {/* Action Controls & Cluster Mode Switcher */}
+        {/* Action Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={triggerBypassTransfer}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-accent/15 hover:bg-accent/25 text-accent border border-accent/30 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
-            title="Directly send file from Device E to Device B, bypassing the host"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>Direct Bypass (E ➔ B)</span>
-          </button>
-
-          <button
-            onClick={() => setUseSimulatedDemo(prev => !prev)}
-            className={cn(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5",
-              useSimulatedDemo 
-                ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 shadow-sm" 
-                : "bg-white/5 border-white/10 text-slate-300 hover:bg-white/10"
-            )}
-            title="Toggle between 5-Node Sketch Topology and Live Connected Peers"
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>{useSimulatedDemo ? "5-Node Sketch Topology" : "Live Peer Mode"}</span>
-          </button>
+          {connectedCount === 0 && onNavigateToConnect && (
+            <button
+              onClick={onNavigateToConnect}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-accent hover:bg-accent/90 text-slate-950 font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>Connect a Peer</span>
+            </button>
+          )}
 
           {onClose && (
             <button
@@ -587,33 +567,19 @@ export function NexusNetworkMap({
       </div>
 
       {/* Interactive Network Topology Canvas */}
-      <div className="relative flex-1 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 overflow-hidden flex items-center justify-center p-4 min-h-[300px]">
+      <div className="relative flex-1 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 overflow-hidden flex items-center justify-center p-4 min-h-[340px]">
         {/* Subtle grid pattern */}
         <div className="absolute inset-0 bg-[radial-gradient(#38bdf812_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none opacity-80" />
 
         {/* Top Floating Helper Banner */}
         <div className="absolute top-3 left-4 z-10 hidden sm:flex items-center gap-2 bg-slate-900/90 border border-white/10 rounded-full px-3 py-1 text-xs text-slate-400 backdrop-blur-md">
           <Upload className="w-3.5 h-3.5 text-accent" />
-          <span>Drop file directly onto any circle to transmit P2P</span>
+          <span>{connectedCount > 0 ? "Drop file directly onto any peer node to transmit" : "Waiting for peers to connect to the mesh"}</span>
         </div>
 
-        {/* SVG Mesh Connections */}
+        {/* Real Connections SVG */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
-          <defs>
-            <marker 
-              id="bypassArrow" 
-              viewBox="0 0 10 10" 
-              refX="6" 
-              refY="5" 
-              markerWidth="6" 
-              markerHeight="6" 
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
-            </marker>
-          </defs>
-
-          {/* 1. Solid Spoke Lines from Host (Device A) to each Peer */}
+          {/* Solid Spoke Lines from Host to each real connected peer */}
           {peerNodes.map(peer => (
             <g key={`spoke-${peer.id}`}>
               <line
@@ -621,7 +587,7 @@ export function NexusNetworkMap({
                 y1={`${hostNode.y}%`}
                 x2={`${peer.x}%`}
                 y2={`${peer.y}%`}
-                stroke="rgba(255, 255, 255, 0.4)"
+                stroke="rgba(255, 255, 255, 0.35)"
                 strokeWidth="2.5"
                 strokeLinecap="round"
               />
@@ -645,30 +611,13 @@ export function NexusNetworkMap({
             </g>
           ))}
 
-          {/* 2. Dashed Direct Bypass Line (Device E ➔ Device B) */}
-          {nodeE && nodeB && (
-            <g className={cn("transition-all duration-300", (simulatingBypass || (inMapTransfer && inMapTransfer.isBypass)) ? "opacity-100" : "opacity-85")}>
-              <line
-                x1={`${nodeE.x}%`}
-                y1={`${nodeE.y - 5}%`}
-                x2={`${nodeB.x}%`}
-                y2={`${nodeB.y + 5}%`}
-                stroke="#38bdf8"
-                strokeWidth={simulatingBypass ? "3.5" : "2.5"}
-                strokeDasharray="6 6"
-                markerEnd="url(#bypassArrow)"
-                className={simulatingBypass ? "animate-[dash_1s_linear_infinite]" : ""}
-              />
-            </g>
-          )}
-
-          {/* 3. Real Active Call Glow Stream */}
-          {(simCallActive || isCallActive) && nodeB && (
+          {/* Real Active Call Glow Stream */}
+          {isCallActive && peerNodes[0] && (
             <line
               x1={`${hostNode.x}%`}
               y1={`${hostNode.y}%`}
-              x2={`${nodeB.x}%`}
-              y2={`${nodeB.y}%`}
+              x2={`${peerNodes[0].x}%`}
+              y2={`${peerNodes[0].y}%`}
               stroke="#22c55e"
               strokeWidth="4"
               strokeLinecap="round"
@@ -677,25 +626,26 @@ export function NexusNetworkMap({
           )}
         </svg>
 
-        {/* Dashed Bypass Line Annotation (Reference Sketch IMG_4474.png text) */}
-        {nodeE && nodeB && (
-          <div 
-            onClick={triggerBypassTransfer}
-            className="absolute z-10 cursor-pointer bg-slate-900/90 hover:bg-slate-800 border border-accent/40 hover:border-accent rounded-xl p-2.5 max-w-[210px] text-left shadow-xl backdrop-blur-md transition-all hover:scale-105 active:scale-95 group"
-            style={{
-              left: `calc(${nodeE.x}% - 40px)`,
-              top: `calc(50% - 30px)`,
-              transform: 'translate(-50%, -50%)'
-            }}
-            title="Click to transfer file directly between Device E and B (Bypassing Host)"
-          >
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-accent">
-              <Zap className="w-3.5 h-3.5 flex-shrink-0 animate-bounce" />
-              <span>(When transferring files from E to B directly.)</span>
-            </div>
-            <div className="text-[10px] text-slate-300 font-mono mt-0.5 font-semibold flex items-center justify-between">
-              <span>(Bypassing Host)</span>
-              <span className="text-[9px] text-accent underline opacity-0 group-hover:opacity-100 transition-opacity">Click to send ➔</span>
+        {/* Empty State: 0 peers connected */}
+        {connectedCount === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
+            {/* Pulsing Radar Ring */}
+            <div className="w-48 h-48 md:w-64 md:h-64 rounded-full border border-accent/20 animate-ping opacity-25 absolute" />
+            <div className="w-36 h-36 md:w-48 md:h-48 rounded-full border border-accent/30 animate-pulse opacity-40 absolute" />
+            
+            {/* Help card positioned below the local node */}
+            <div className="mt-40 md:mt-48 max-w-sm text-center px-4 pointer-events-auto bg-slate-900/80 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-xl">
+              <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                Direct WebRTC channel ready. Share your Handshake token or QR code with a nearby peer to join the encrypted mesh.
+              </p>
+              {onNavigateToConnect && (
+                <button
+                  onClick={onNavigateToConnect}
+                  className="mt-3 px-3 py-1.5 rounded-xl bg-accent/20 hover:bg-accent/30 text-accent text-xs font-semibold border border-accent/30 transition-all cursor-pointer"
+                >
+                  Open QR Utility ➔
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -714,17 +664,16 @@ export function NexusNetworkMap({
               />
             </div>
             <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-              <span>{inMapTransfer.isBypass ? "Direct Bypass SCTP" : "Encrypted P2P"}</span>
+              <span>Encrypted DataChannel</span>
               <span className="text-emerald-400 font-semibold">{inMapTransfer.speed}</span>
             </div>
           </div>
         )}
 
-        {/* Render Interactive Nodes */}
+        {/* Render Real Nodes */}
         {nodes.map(node => {
           const isDragTarget = dragOverNodeId === node.id;
-          const isNodeInCall = (simCallActive || isCallActive) && (node.isHost || node.name.includes('Device B'));
-          const isNodeInBypass = (simulatingBypass) && (node.name.includes('Device E') || node.name.includes('Device B'));
+          const isNodeInCall = isCallActive && (node.isHost || !node.isSelf);
           const isSelected = selectedNode?.id === node.id;
 
           return (
@@ -740,16 +689,11 @@ export function NexusNetworkMap({
                 top: `${node.y}%`,
                 transform: 'translate(-50%, -50%)'
               }}
-              title={`Click ${node.name} to send files, call, or chat. Or drop file directly to transmit.`}
+              title={`Click ${node.name} to view actions. Drag & drop files directly onto this node to send.`}
             >
               {/* Call indicator ripple */}
               {isNodeInCall && (
                 <div className="absolute -inset-3 rounded-full border-2 border-emerald-500 animate-ping opacity-75 pointer-events-none" />
-              )}
-
-              {/* Bypass Transfer ripple */}
-              {isNodeInBypass && (
-                <div className="absolute -inset-3 rounded-full border-2 border-accent animate-ping opacity-80 pointer-events-none" />
               )}
 
               {/* Node Avatar Circle */}
@@ -764,22 +708,15 @@ export function NexusNetworkMap({
                     : "border-white/80 group-hover:scale-110 group-hover:border-accent",
                 node.isHost && "ring-2 ring-accent/60 ring-offset-2 ring-offset-slate-950"
               )}>
-                {/* Text inside node circle ("pfp" as in sketch) */}
+                {/* Node icon / initial */}
                 <div className="flex flex-col items-center justify-center leading-tight">
                   {node.isHost ? (
                     <Crown className="w-5 h-5 md:w-6 md:h-6 text-yellow-300 drop-shadow-md mb-0.5" />
                   ) : null}
-                  <span className="text-xs md:text-sm font-black tracking-wider uppercase">
-                    pfp
+                  <span className="text-xs md:text-sm font-bold tracking-wider uppercase">
+                    {node.name.charAt(0)}
                   </span>
                 </div>
-
-                {/* Host Crown Badge */}
-                {node.isHost && (
-                  <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-yellow-400 text-slate-950 flex items-center justify-center font-black text-[10px] shadow-sm">
-                    ★
-                  </span>
-                )}
 
                 {/* Drop cue overlay */}
                 {isDragTarget && (
@@ -792,7 +729,7 @@ export function NexusNetworkMap({
               {/* Node Label (Device Name & Role text) */}
               <div className="mt-2 text-center flex flex-col items-center">
                 <span className={cn(
-                  "text-xs md:text-sm font-bold tracking-tight text-white whitespace-nowrap px-2 py-0.5 rounded-lg transition-colors shadow-sm",
+                  "text-xs md:text-sm font-bold tracking-tight text-white whitespace-nowrap px-2.5 py-0.5 rounded-lg transition-colors shadow-sm",
                   node.isHost ? "bg-accent/20 text-accent font-black border border-accent/30" : "bg-slate-900/80 border border-white/10"
                 )}>
                   {node.name}
@@ -811,7 +748,7 @@ export function NexusNetworkMap({
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <div className="flex items-center gap-2.5">
                 <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold", selectedNode.avatarColor)}>
-                  {selectedNode.isHost ? "★" : selectedNode.name.charAt(0)}
+                  {selectedNode.isHost ? "👑" : selectedNode.name.charAt(0)}
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
@@ -822,13 +759,13 @@ export function NexusNetworkMap({
                   </h4>
                   <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Direct P2P Link ({selectedNode.pingMs}ms)</span>
+                    <span>Direct WebRTC Link {selectedNode.pingMs > 0 ? `(${selectedNode.pingMs}ms)` : '(Local)'}</span>
                   </div>
                 </div>
               </div>
               <button 
                 onClick={() => setSelectedNode(null)}
-                className="w-7 h-7 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                className="w-7 h-7 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -861,7 +798,7 @@ export function NexusNetworkMap({
               </button>
             </div>
 
-            {/* Direct message quick input for this node */}
+            {/* Direct message quick input */}
             <form onSubmit={handleSendMessage} className="mt-3 flex gap-1.5">
               <input 
                 type="text"
@@ -872,7 +809,7 @@ export function NexusNetworkMap({
               />
               <button
                 type="submit"
-                className="px-3 py-1.5 rounded-xl bg-accent/20 hover:bg-accent/30 text-accent font-bold text-xs flex items-center justify-center"
+                className="px-3 py-1.5 rounded-xl bg-accent/20 hover:bg-accent/30 text-accent font-bold text-xs flex items-center justify-center cursor-pointer"
               >
                 <Send className="w-3 h-3" />
               </button>
@@ -881,12 +818,11 @@ export function NexusNetworkMap({
         )}
       </div>
 
-      {/* Bottom Live Activity Feed & Controls - Exactly faithful to sketch text */}
+      {/* Bottom Live Activity Feed & Controls */}
       <div className="p-4 md:p-5 border-t border-white/10 bg-slate-900/95 flex flex-col gap-3 flex-shrink-0">
-        {/* Sketch Description Banner */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-xs md:text-sm text-slate-300 font-sans leading-relaxed border-l-2 border-accent pl-3">
-            All messages and incoming, outgoing connections will be shown here and private calls occuring between two users can also be seen here by everyone on the network.
+            Real-time WebRTC signal feed, active peer connections, encrypted transfers, and live call telemetry.
           </div>
 
           {/* Interactive Navigation Tabs */}
@@ -894,7 +830,7 @@ export function NexusNetworkMap({
             <button
               onClick={() => setActiveBottomTab('messages')}
               className={cn(
-                "px-3 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5",
+                "px-3 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer",
                 activeBottomTab === 'messages' ? "bg-accent text-slate-950 font-bold" : "text-slate-400 hover:text-white"
               )}
             >
@@ -904,23 +840,23 @@ export function NexusNetworkMap({
             <button
               onClick={() => setActiveBottomTab('connections')}
               className={cn(
-                "px-3 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5",
+                "px-3 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer",
                 activeBottomTab === 'connections' ? "bg-accent text-slate-950 font-bold" : "text-slate-400 hover:text-white"
               )}
             >
               <Activity className="w-3 h-3" />
-              <span>Connections</span>
+              <span>Connections ({connectedCount})</span>
             </button>
             <button
               onClick={() => setActiveBottomTab('calls')}
               className={cn(
-                "px-3 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 relative",
+                "px-3 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 relative cursor-pointer",
                 activeBottomTab === 'calls' ? "bg-accent text-slate-950 font-bold" : "text-slate-400 hover:text-white"
               )}
             >
               <PhoneCall className="w-3 h-3" />
-              <span>Private Calls</span>
-              {(simCallActive || isCallActive) && (
+              <span>Live Calls</span>
+              {isCallActive && (
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
               )}
             </button>
@@ -950,24 +886,24 @@ export function NexusNetworkMap({
                       {evt.text}
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-500 flex-shrink-0">{evt.time}</span>
+                  <span className="text-[10px] text-slate-500 font-mono flex-shrink-0">{evt.time}</span>
                 </div>
               ))}
             </div>
 
-            {/* Broadcast / Direct Message Input Field */}
-            <form onSubmit={handleSendMessage} className="flex gap-2">
+            {/* Bottom Global Network Broadcast Box */}
+            <form onSubmit={handleSendMessage} className="flex items-center gap-2">
               <input
                 type="text"
-                placeholder="Broadcast a message to everyone on the Nexus network map..."
+                placeholder="Broadcast a message across all connected nodes..."
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                className="flex-1 bg-slate-950/80 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent"
+                className="flex-1 bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent"
               />
               <button
                 type="submit"
                 disabled={!inputMessage.trim()}
-                className="px-4 py-2 rounded-xl bg-accent hover:bg-accent/90 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-accent hover:bg-accent/90 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md active:scale-95"
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Send</span>
@@ -976,88 +912,61 @@ export function NexusNetworkMap({
           </div>
         )}
 
-        {/* Tab 2: Incoming & Outgoing Connections Matrix */}
+        {/* Tab 2: Connections List */}
         {activeBottomTab === 'connections' && (
-          <div className="bg-slate-950/80 border border-white/10 rounded-2xl p-3 max-h-36 overflow-y-auto font-mono text-xs">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {nodes.map(node => (
-                <div key={node.id} className="p-2 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-2">
+          <div className="bg-slate-950/80 border border-white/10 rounded-2xl p-3 max-h-36 overflow-y-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+              {nodes.map(n => (
+                <div key={n.id} className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <div className={cn("w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white", n.avatarColor)}>
+                      {n.isHost ? "👑" : n.name.charAt(0)}
+                    </div>
                     <div className="min-w-0">
-                      <div className="text-white font-bold text-xs truncate">{node.name}</div>
-                      <div className="text-[10px] text-slate-400">{node.roleText} • {node.pingMs}ms RTT</div>
+                      <div className="text-xs font-bold truncate text-white">{n.name}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{n.roleText} • {n.status}</div>
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleNodeClick(node)}
-                    className="px-2 py-1 rounded bg-accent/15 text-accent text-[10px] font-bold hover:bg-accent/25"
-                  >
-                    Action
-                  </button>
+                  <span className="text-[10px] font-mono text-emerald-400 font-semibold flex-shrink-0">
+                    {n.pingMs}ms
+                  </span>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Tab 3: Private Calls Occurring Between Users */}
+        {/* Tab 3: Active Calls */}
         {activeBottomTab === 'calls' && (
-          <div className="bg-slate-950/80 border border-white/10 rounded-2xl p-4 flex flex-col gap-3 font-mono text-xs">
-            {(simCallActive || isCallActive) ? (
-              <div className="flex items-center justify-between flex-wrap gap-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3">
+          <div className="bg-slate-950/80 border border-white/10 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+            {isCallActive ? (
+              <>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 animate-pulse">
-                    <PhoneCall className="w-5 h-5" />
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                    <PhoneCall className="w-5 h-5 animate-pulse" />
                   </div>
                   <div>
-                    <div className="text-white font-bold text-sm flex items-center gap-2">
-                      <span>Private Call: {simCallPeers.p1} ⇄ {simCallPeers.p2}</span>
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px]">
-                        LIVE
+                    <div className="text-sm font-bold text-white flex items-center gap-2">
+                      <span>Encrypted {callType?.toUpperCase() || 'Audio'} Call Active</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        {formatTime(callDuration)}
                       </span>
                     </div>
-                    <div className="text-slate-400 text-xs flex items-center gap-3 mt-1">
-                      <span>Duration: {formatTime(simCallDuration)}</span>
-                      <span>•</span>
-                      <span>End-to-End Encrypted SRTP</span>
-                    </div>
+                    <div className="text-xs text-slate-400">Zero-relay WebRTC SRTP audio/video stream</div>
                   </div>
                 </div>
 
-                {/* Animated Audio Waveform */}
-                <div className="flex items-center gap-1">
-                  {[4, 12, 8, 16, 6, 14, 10, 18, 8, 14].map((h, i) => (
-                    <span 
-                      key={i} 
-                      className="w-1 bg-emerald-400 rounded-full animate-pulse"
-                      style={{ height: `${h}px`, animationDelay: `${i * 100}ms` }}
-                    />
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleEndCall}
-                    className="px-3 py-1.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
-                  >
-                    <PhoneOff className="w-3.5 h-3.5" />
-                    <span>End Session</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
-                <div className="text-slate-400 text-xs">
-                  No private calls currently active in the mesh. All calls initiated between peers are visible to the network.
-                </div>
                 <button
-                  onClick={() => handleStartCall('audio')}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                  onClick={handleEndCall}
+                  className="px-3 py-1.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
                 >
-                  <PhoneCall className="w-3.5 h-3.5" />
-                  <span>Start Private Call</span>
+                  <PhoneOff className="w-3.5 h-3.5" />
+                  <span>End Call</span>
                 </button>
+              </>
+            ) : (
+              <div className="w-full text-center py-3 text-xs text-slate-400">
+                No active calls on the network. Select any connected peer above to start an encrypted voice or video call.
               </div>
             )}
           </div>

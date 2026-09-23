@@ -58,6 +58,7 @@ import { DataStream } from './components/DataStream';
 import { PacketTransferAnimation } from './components/PacketTransferAnimation';
 import { ProfileModal } from './components/ProfileModal';
 import { ViewProfileModal } from './components/ViewProfileModal';
+import { NexusContainer } from './nexus';
 import { NexusFailoverHUD } from './components/NexusFailoverHUD';
 import { NexusNetworkMap } from './components/NexusNetworkMap';
 import { CallOverlay } from './components/CallOverlay';
@@ -219,7 +220,6 @@ export default function App() {
   const [showSimWarning, setShowSimWarning] = useState(false);
   const [showFailoverMenu, setShowFailoverMenu] = useState(false);
   const [showNetworkMapModal, setShowNetworkMapModal] = useState(false);
-  const [matrixTab, setMatrixTab] = useState<'standard' | 'network_map'>('standard');
   const [showCreatorPopup, setShowCreatorPopup] = useState(false);
   const [titleTapCount, setTitleTapCount] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
@@ -2619,6 +2619,16 @@ export default function App() {
               Transceiver
             </button>
             <button 
+              onClick={() => setActiveTab("preview")}
+              className={cn(
+                "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-semibold transition-all rounded-xl whitespace-nowrap flex items-center gap-1.5",
+                activeTab === "preview" ? "bg-white dark:bg-transparent text-text shadow-sm" : "text-muted hover:text-text cursor-pointer"
+              )}
+            >
+              <Network className="w-3.5 h-3.5 text-accent" />
+              <span>Preview</span>
+            </button>
+            <button 
               onClick={() => { setActiveTab("qr"); addLog("Entering QR Utility", "info"); }}
               className={cn(
                 "nav-tab px-3 md:px-3 lg:px-4 py-1.5 text-[10px] md:text-xs font-medium transition-all rounded-xl whitespace-nowrap",
@@ -2780,6 +2790,36 @@ export default function App() {
                 onNetworkSplit={handleNetworkSplit}
               />
             </motion.div>
+          ) : activeTab === "preview" ? (
+            <motion.div 
+              key="network-preview" 
+              initial={{ opacity: 0, y: 15, filter: "blur(4px)" }} 
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} 
+              exit={{ opacity: 0, y: -15, filter: "blur(4px)" }} 
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              className="h-full w-full overflow-hidden"
+            >
+              <NexusContainer 
+                localUsername={profile.username}
+                localAvatarColor={profile.avatarColor}
+                localPeerId={profile.id}
+                roomId="nexus-main"
+                onFileReceived={(file, fromPeer) => {
+                  setFiles(prev => [{
+                    id: Math.random().toString(36).substring(2) + Date.now().toString(36),
+                    name: file.name,
+                    size: file.size,
+                    mimeType: file.type || 'application/octet-stream',
+                    senderName: fromPeer.username,
+                    senderColor: fromPeer.avatarColor,
+                    timestamp: new Date(),
+                    direction: 'in',
+                    blob: file
+                  }, ...prev]);
+                  addLog(`Received file "${file.name}" from ${fromPeer.username} via Nexus WebRTC`, 'ok');
+                }}
+              />
+            </motion.div>
           ) : role ? (
             <motion.div 
               key="p2p-active"
@@ -2823,47 +2863,23 @@ export default function App() {
                   <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
-                      <div className="inline-flex p-0.5 rounded-xl bg-black/5 dark:bg-white/5 border border-white/10 text-xs">
-                        <button
-                          onClick={() => setMatrixTab('standard')}
-                          className={cn(
-                            "px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer",
-                            matrixTab === 'standard' ? "bg-accent text-white shadow-sm" : "text-muted hover:text-text"
-                          )}
-                        >
-                          Port Setup
-                        </button>
-                        <button
-                          onClick={() => setMatrixTab('network_map')}
-                          className={cn(
-                            "px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer flex items-center gap-1.5",
-                            matrixTab === 'network_map' ? "bg-accent text-white shadow-sm" : "text-accent hover:bg-accent/10"
-                          )}
-                        >
-                          <Network className="w-3.5 h-3.5" />
-                          <span>Nexus Network Map ➔</span>
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {matrixTab === 'network_map' && (
-                        <button
-                          onClick={() => setShowNetworkMapModal(true)}
-                          className="p-1.5 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent transition-colors cursor-pointer"
-                          title="Maximize Nexus Network Map to Fullscreen"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
                       <button
-                        onClick={() => setShowFailoverMenu(true)}
-                        className="text-[11px] font-mono text-accent hover:underline flex items-center gap-1 cursor-pointer"
-                        title="Open Synchronized Nexus Peer Registry"
+                        onClick={() => setActiveTab("preview")}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30 transition-all cursor-pointer shadow-sm group hover:scale-[1.02] active:scale-[0.98]"
+                        title="Open in Preview Tab (Live P2P topology, file drop & encrypted call streams)"
                       >
-                        <Users className="w-3.5 h-3.5" />
-                        <span>Peer Registry</span>
+                        <Network className="w-3.5 h-3.5 text-accent group-hover:scale-110 transition-transform" />
+                        <span>Nexus Network Map ➔</span>
                       </button>
                     </div>
+                    <button
+                      onClick={() => setShowFailoverMenu(true)}
+                      className="text-[11px] font-mono text-accent hover:underline flex items-center gap-1 cursor-pointer"
+                      title="Open Synchronized Nexus Peer Registry"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Peer Registry</span>
+                    </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button 
@@ -2887,42 +2903,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {matrixTab === 'network_map' ? (
-                  <div className="flex-1 flex flex-col relative overflow-hidden lg:min-h-0 min-h-[580px] rounded-3xl shadow-xl">
-                    <NexusNetworkMap
-                      localProfile={profile}
-                      role={role}
-                      peerProfiles={peerProfiles}
-                      connectedCount={connectedCount}
-                      dataChannels={dataChannels.current}
-                      activeTransfer={transfer}
-                      isCallActive={isCallActive}
-                      callType={callType}
-                      messages={messages}
-                      logs={logs}
-                      onSendFileToPeer={sendFile}
-                      onStartCall={(type) => startCall(type)}
-                      onEndCall={endCall}
-                      onSendMessage={(text) => sendMessage(text)}
-                      onAddReceivedFile={(file) => {
-                        setFiles(prev => [{
-                          id: Math.random().toString(36).substring(2) + Date.now().toString(36),
-                          name: file.name,
-                          size: file.size,
-                          mimeType: file.type || 'application/octet-stream',
-                          senderName: 'Network Peer',
-                          senderColor: 'bg-accent',
-                          timestamp: Date.now(),
-                          status: 'completed',
-                          isOutgoing: false,
-                          blob: file
-                        }, ...prev]);
-                      }}
-                      isModal={false}
-                    />
-                  </div>
-                ) : (
-                  <div className="glass-panel flex-1 flex flex-col relative overflow-hidden lg:min-h-0 min-h-[400px]">
+                <div className="glass-panel flex-1 flex flex-col relative overflow-hidden lg:min-h-0 min-h-[400px]">
                   <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center w-full text-center">
                     <div className="text-sm font-medium text-muted self-start w-full text-left mb-6 pb-2 border-b border-white/20 dark:border-transparent dark:border-white/10 dark:border-transparent ">
                       Handshake Port
@@ -3103,7 +3084,6 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                )}
               </section>
 
               {/* Rest of the Sections: File Payload & Logs */}
