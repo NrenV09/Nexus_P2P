@@ -17,7 +17,8 @@ import {
   Copy,
   Share,
   Moon,
-  Sun
+  Sun,
+  Network
 } from 'lucide-react';
 
 import { cn, formatBytes } from '../lib/utils';
@@ -38,6 +39,7 @@ import { DataStream } from '../components/DataStream';
 import { PacketTransferAnimation } from '../components/PacketTransferAnimation';
 import { ProfileModal } from '../components/ProfileModal';
 import { ViewProfileModal } from '../components/ViewProfileModal';
+import { NexusNetworkMap } from '../components/NexusNetworkMap';
 import { generateRandomName } from '../lib/nameGenerator';
 import { purgeAllTempStorage } from '../lib/diskStreamer';
 
@@ -90,6 +92,7 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState<FilePayload | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isSimulation, setIsSimulation] = useState(false);
+  const [showNetworkMapModal, setShowNetworkMapModal] = useState(false);
 
   // --- Refs ---
   const cancelTransferRef = useRef(false);
@@ -861,9 +864,10 @@ export default function App() {
     }]);
   };
 
-  const sendFile = async (file: File) => {
-    if (dataChannels.current.size === 0) return;
-    addLog(`Initiating transfer: ${file.name}`, "info");
+  const sendFile = async (file: File, targetPeerId?: string) => {
+    if (dataChannels.current.size === 0 && !isSimulation) return;
+    const targetPeerName = targetPeerId ? (peerProfiles[targetPeerId]?.username || 'peer') : undefined;
+    addLog(`Initiating transfer: ${file.name}${targetPeerName ? ` to ${targetPeerName}` : ''}`, "info");
     
     const meta = JSON.stringify({
       type: 'file-meta',
@@ -872,12 +876,20 @@ export default function App() {
       mimeType: file.type,
       senderName: profile.username,
       senderColor: profile.avatarColor,
-      senderId: profile.id
+      senderId: profile.id,
+      targetPeerId
     });
 
-    dataChannels.current.forEach(dc => {
-      if (dc.readyState === 'open') dc.send(meta);
-    });
+    if (targetPeerId) {
+      const targetDc = dataChannels.current.get(targetPeerId);
+      if (targetDc && targetDc.readyState === 'open') {
+        targetDc.send(meta);
+      }
+    } else {
+      dataChannels.current.forEach(dc => {
+        if (dc.readyState === 'open') dc.send(meta);
+      });
+    }
 
     setFiles(prev => [{
       id: (Math.random().toString(36).substring(2) + Date.now().toString(36)),
@@ -1165,7 +1177,17 @@ export default function App() {
               {/* Top/First Section: Connection Matrix */}
               <section className="col-span-1 lg:col-span-4 flex flex-col gap-4 flex-shrink-0 lg:overflow-y-auto scrollbar-hide">
                 <div className="glass-panel p-5 flex-shrink-0">
-                  <h3 className="text-sm font-semibold text-text mb-4">Connection Matrix</h3>
+                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
+                    <button
+                      onClick={() => setShowNetworkMapModal(true)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30 transition-all cursor-pointer shadow-sm group hover:scale-[1.02] active:scale-[0.98]"
+                      title="Open Nexus Network Map (Drag & drop files to individual peers, see direct bypass lines & live calls)"
+                    >
+                      <Network className="w-3.5 h-3.5 text-accent group-hover:scale-110 transition-transform" />
+                      <span>Nexus Network Map ➔</span>
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button 
                       onClick={() => { setRole("host"); resetAll(); }}
@@ -1576,6 +1598,36 @@ export default function App() {
             file={selectedFile} 
             onClose={() => setSelectedFile(null)} 
           />
+        )}
+
+        {showNetworkMapModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-6 lg:p-8 bg-black/75 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="w-full max-w-5xl h-full md:h-[90vh] flex flex-col bg-slate-950 rounded-3xl border border-white/10 shadow-2xl overflow-hidden relative"
+            >
+              <NexusNetworkMap 
+                localProfile={profile}
+                role={role}
+                peerProfiles={peerProfiles}
+                connectedCount={connectedCount}
+                dataChannels={dataChannels.current}
+                activeTransfer={transfer}
+                messages={messages}
+                logs={logs}
+                onSendFileToPeer={sendFile}
+                onClose={() => setShowNetworkMapModal(false)}
+                isModal={true}
+              />
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

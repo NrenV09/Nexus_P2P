@@ -23,7 +23,8 @@ import {
   Maximize2,
   Info,
   HardDrive,
-  Trash2
+  Trash2,
+  Network
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -58,6 +59,7 @@ import { PacketTransferAnimation } from './components/PacketTransferAnimation';
 import { ProfileModal } from './components/ProfileModal';
 import { ViewProfileModal } from './components/ViewProfileModal';
 import { NexusFailoverHUD } from './components/NexusFailoverHUD';
+import { NexusNetworkMap } from './components/NexusNetworkMap';
 import { CallOverlay } from './components/CallOverlay';
 import { IncomingCallModal, IncomingCallData } from './components/IncomingCallModal';
 import { EasterEggModal, playTapTick } from './components/EasterEggModal';
@@ -216,6 +218,7 @@ export default function App() {
   const [isSimulation, setIsSimulation] = useState(false);
   const [showSimWarning, setShowSimWarning] = useState(false);
   const [showFailoverMenu, setShowFailoverMenu] = useState(false);
+  const [showNetworkMapModal, setShowNetworkMapModal] = useState(false);
   const [showCreatorPopup, setShowCreatorPopup] = useState(false);
   const [titleTapCount, setTitleTapCount] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
@@ -2243,10 +2246,11 @@ export default function App() {
     }
   };
 
-  const sendFile = async (file: File) => {
-    if (dataChannels.current.size === 0) return;
+  const sendFile = async (file: File, targetPeerId?: string) => {
+    if (dataChannels.current.size === 0 && !isSimulation) return;
     const isDirect = directDownloadsRef.current;
-    addLog(`Initiating transfer: ${file.name}${isDirect ? ' (Bypass RAM Limits)' : ''}`, "info");
+    const targetPeerName = targetPeerId ? (peerProfiles[targetPeerId]?.username || 'peer') : undefined;
+    addLog(`Initiating transfer: ${file.name}${targetPeerName ? ` to ${targetPeerName}` : ''}${isDirect ? ' (Bypass RAM Limits)' : ''}`, "info");
     
     const meta = JSON.stringify({
       type: 'file-meta',
@@ -2256,12 +2260,20 @@ export default function App() {
       senderName: profile.username,
       senderColor: profile.avatarColor,
       senderId: profile.id,
-      bypassRam: isDirect
+      bypassRam: isDirect,
+      targetPeerId
     });
 
-    dataChannels.current.forEach(dc => {
-      if (dc.readyState === 'open') dc.send(meta);
-    });
+    if (targetPeerId) {
+      const targetDc = dataChannels.current.get(targetPeerId);
+      if (targetDc && targetDc.readyState === 'open') {
+        targetDc.send(meta);
+      }
+    } else {
+      dataChannels.current.forEach(dc => {
+        if (dc.readyState === 'open') dc.send(meta);
+      });
+    }
 
     // Bypass RAM / Direct Downloads: Do not sandbox the file in the drop zone
     if (!isDirect) {
@@ -2336,14 +2348,24 @@ export default function App() {
 
         let openCount = 0;
         let maxBuffer = 0;
-        dataChannels.current.forEach(dc => {
-          if (dc.readyState === 'open') {
-            openCount++;
-            if (typeof dc.bufferedAmount === 'number') {
-              maxBuffer = Math.max(maxBuffer, dc.bufferedAmount);
+        if (targetPeerId) {
+          const targetDc = dataChannels.current.get(targetPeerId);
+          if (targetDc && targetDc.readyState === 'open') {
+            openCount = 1;
+            if (typeof targetDc.bufferedAmount === 'number') {
+              maxBuffer = targetDc.bufferedAmount;
             }
           }
-        });
+        } else {
+          dataChannels.current.forEach(dc => {
+            if (dc.readyState === 'open') {
+              openCount++;
+              if (typeof dc.bufferedAmount === 'number') {
+                maxBuffer = Math.max(maxBuffer, dc.bufferedAmount);
+              }
+            }
+          });
+        }
 
         if (openCount === 0 && !isSimulation) {
           await handleTransferFailure("All peer connections disconnected during transfer", undefined, file.name, false);
@@ -2372,16 +2394,28 @@ export default function App() {
           }
 
           let anySent = false;
-          dataChannels.current.forEach(dc => {
-            if (dc.readyState === 'open') {
+          if (targetPeerId) {
+            const targetDc = dataChannels.current.get(targetPeerId);
+            if (targetDc && targetDc.readyState === 'open') {
               try {
-                dc.send(chunkData);
+                targetDc.send(chunkData);
                 anySent = true;
               } catch (sendErr) {
                 console.warn("RTCDataChannel send chunk error:", sendErr);
               }
             }
-          });
+          } else {
+            dataChannels.current.forEach(dc => {
+              if (dc.readyState === 'open') {
+                try {
+                  dc.send(chunkData);
+                  anySent = true;
+                } catch (sendErr) {
+                  console.warn("RTCDataChannel send chunk error:", sendErr);
+                }
+              }
+            });
+          }
 
           if (anySent || isSimulation) {
             offset += chunkData.byteLength;
@@ -2785,8 +2819,18 @@ export default function App() {
                 </div>
 
                 <div className="glass-panel p-5 flex-shrink-0">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
+                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
+                      <button
+                        onClick={() => setShowNetworkMapModal(true)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30 transition-all cursor-pointer shadow-sm group hover:scale-[1.02] active:scale-[0.98]"
+                        title="Open Nexus Network Map (Drag & drop files to individual peers, see direct bypass lines & live calls)"
+                      >
+                        <Network className="w-3.5 h-3.5 text-accent group-hover:scale-110 transition-transform" />
+                        <span>Nexus Network Map ➔</span>
+                      </button>
+                    </div>
                     <button
                       onClick={() => setShowFailoverMenu(true)}
                       className="text-[11px] font-mono text-accent hover:underline flex items-center gap-1 cursor-pointer"
@@ -3340,6 +3384,38 @@ export default function App() {
                   onNetworkSplit={handleNetworkSplit}
                 />
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {showNetworkMapModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-6 lg:p-8 bg-black/75 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="w-full max-w-5xl h-full md:h-[90vh] flex flex-col bg-slate-950 rounded-3xl border border-white/10 shadow-2xl overflow-hidden relative"
+            >
+              <NexusNetworkMap 
+                localProfile={profile}
+                role={role}
+                peerProfiles={peerProfiles}
+                connectedCount={connectedCount}
+                dataChannels={dataChannels.current}
+                activeTransfer={transfer}
+                isCallActive={isCallActive}
+                callType={callType}
+                messages={messages}
+                logs={logs}
+                onSendFileToPeer={sendFile}
+                onClose={() => setShowNetworkMapModal(false)}
+                isModal={true}
+              />
             </motion.div>
           </motion.div>
         )}
