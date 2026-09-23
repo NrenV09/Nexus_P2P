@@ -1,13 +1,17 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { NexusPeer, NexusTransfer, NodePosition } from './types';
-import { ZoomIn, ZoomOut, RotateCcw, ShieldCheck, Zap, Radio, Layers, HardDrive } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { NexusPeer, NexusTransfer, NodePosition, NexusCall, BatchTransferState, ConcurrentBypassState } from './types';
+import { ZoomIn, ZoomOut, RotateCcw, ShieldCheck, Zap, Radio, HardDrive, Phone, Video } from 'lucide-react';
 
 interface NetworkMapProps {
   localPeer: NexusPeer;
   connectedPeers: Map<string, NexusPeer>;
   hostId: string;
   activeTransfers?: Map<string, NexusTransfer>;
+  activeBatches?: Map<string, BatchTransferState>;
+  activeCall?: NexusCall | null;
+  concurrentPeerStates?: ConcurrentBypassState[];
   onFileDrop?: (targetPeerId: string, file: File) => void;
+  onFilesDrop?: (targetPeerId: string, files: File[]) => void;
   onNodeClick?: (peer: NexusPeer) => void;
 }
 
@@ -27,7 +31,11 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
   connectedPeers,
   hostId,
   activeTransfers,
+  activeBatches,
+  activeCall,
+  concurrentPeerStates,
   onFileDrop,
+  onFilesDrop,
   onNodeClick
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -35,7 +43,6 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
 
   // Physics simulation nodes
   const nodesRef = useRef<Map<string, NodePosition>>(new Map());
-  const particlesRef = useRef<Particle[]>([]);
   const animationFrameRef = useRef<number | null>(null);
 
   // Viewport Transform (Pan & Zoom)
@@ -106,71 +113,81 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
     });
   }, [localPeer, connectedPeers, hostId]);
 
-  // Convert client viewport mouse coordinate to canvas world coordinate
-  const screenToWorld = useCallback((screenX: number, screenY: number) => {
+  // Coordinate Conversion helper
+  const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     const cx = rect.width / 2;
     const cy = rect.height / 2;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
     const currentPan = panRef.current;
     const currentZoom = zoomRef.current;
 
-    const wx = (screenX - rect.left - cx - currentPan.x) / currentZoom;
-    const wy = (screenY - rect.top - cy - currentPan.y) / currentZoom;
-    return { x: wx, y: wy };
-  }, []);
+    const worldX = (mouseX - (cx + currentPan.x)) / currentZoom;
+    const worldY = (mouseY - (cy + currentPan.y)) / currentZoom;
 
-  // Find node under mouse
-  const getNodeAt = useCallback((screenX: number, screenY: number, extraRadius: number = 0) => {
-    const { x, y } = screenToWorld(screenX, screenY);
-    let hit: NodePosition | null = null;
+    return { worldX, worldY, mouseX, mouseY };
+  };
 
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { worldX, worldY } = getCanvasCoords(e);
+    lastMousePos.current = { x: e.clientX, y: e.clientY };
+
+    // Test node intersection
+    let hitNode: NodePosition | null = null;
     nodesRef.current.forEach(node => {
-      const dx = node.x - x;
-      const dy = node.y - y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= node.radius + extraRadius) {
-        hit = node;
+      const dist = Math.hypot(node.x - worldX, node.y - worldY);
+      if (dist <= node.radius + 6) {
+        hitNode = node;
       }
     });
 
-    return hit;
-  }, [screenToWorld]);
-
-  // Canvas Mouse & Wheel Interaction handlers
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0) return; // Only left click
-    const hit = getNodeAt(e.clientX, e.clientY);
-    if (hit) {
-      isDraggingNode.current = hit.id;
-      setSelectedNodeId(hit.id);
-      onNodeClick?.(hit.peer);
+    if (hitNode) {
+      isDraggingNode.current = (hitNode as NodePosition).id;
+      setSelectedNodeId((hitNode as NodePosition).id);
+      onNodeClick?.((hitNode as NodePosition).peer);
     } else {
       isPanning.current = true;
-      lastMousePos.current = { x: e.clientX, y: e.clientY };
+      setSelectedNodeId(null);
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { worldX, worldY } = getCanvasCoords(e);
+
+    // Node Dragging
     if (isDraggingNode.current) {
-      const node = nodesRef.current.get(isDraggingNode.current);
-      if (node) {
-        const { x, y } = screenToWorld(e.clientX, e.clientY);
-        node.x = x;
-        node.y = y;
-        node.vx = 0;
-        node.vy = 0;
+      const draggedNode = nodesRef.current.get(isDraggingNode.current);
+      if (draggedNode) {
+        draggedNode.x = worldX;
+        draggedNode.y = worldY;
+        draggedNode.vx = 0;
+        draggedNode.vy = 0;
       }
-    } else if (isPanning.current) {
+      return;
+    }
+
+    // Canvas Panning
+    if (isPanning.current) {
       const dx = e.clientX - lastMousePos.current.x;
       const dy = e.clientY - lastMousePos.current.y;
-      setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
       lastMousePos.current = { x: e.clientX, y: e.clientY };
-    } else {
-      const hit = getNodeAt(e.clientX, e.clientY);
-      setHoveredNode(hit);
+      setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+      return;
     }
+
+    // Hover Detection
+    let hit: NodePosition | null = null;
+    nodesRef.current.forEach(node => {
+      const dist = Math.hypot(node.x - worldX, node.y - worldY);
+      if (dist <= node.radius + 8) {
+        hit = node;
+      }
+    });
+    setHoveredNode(hit);
   };
 
   const handleMouseUp = () => {
@@ -180,19 +197,27 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
 
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    setZoom(prev => Math.min(3.5, Math.max(0.35, prev * zoomFactor)));
+    const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+    setZoom(prev => Math.min(2.5, Math.max(0.35, prev * zoomFactor)));
   };
 
-  // Native Drag and Drop File Transfer over dynamic canvas nodes
+  // Drag and Drop Files over Canvas
   const handleDragOver = (e: React.DragEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    const { worldX, worldY } = getCanvasCoords(e as any);
 
-    // Highlight the hovered target node if mouse is over it
-    const hit = getNodeAt(e.clientX, e.clientY, 15);
-    if (hit && hit.id !== localPeer.id) {
-      setDropTargetNodeId(hit.id);
+    let target: NodePosition | null = null;
+    nodesRef.current.forEach(node => {
+      if (node.id !== localPeer.id) {
+        const dist = Math.hypot(node.x - worldX, node.y - worldY);
+        if (dist <= node.radius + 20) {
+          target = node;
+        }
+      }
+    });
+
+    if (target) {
+      setDropTargetNodeId((target as NodePosition).id);
     } else {
       setDropTargetNodeId(null);
     }
@@ -210,8 +235,12 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
     if (!targetId || targetId === localPeer.id) return;
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      onFileDrop?.(targetId, file);
+      const filesArray = Array.from(e.dataTransfer.files);
+      if (onFilesDrop) {
+        onFilesDrop(targetId, filesArray);
+      } else if (onFileDrop) {
+        onFileDrop(targetId, filesArray[0]);
+      }
     }
   };
 
@@ -229,7 +258,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
       if (!isRunning) return;
       tick++;
 
-      // Handle retina canvas sizing
+      // Retina canvas sizing
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
@@ -238,15 +267,15 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
       }
 
       ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, rect.width, rect.height);
 
+      // Viewport Transform (Centered + Pan + Zoom)
       const cx = rect.width / 2;
       const cy = rect.height / 2;
       const currentPan = panRef.current;
       const currentZoom = zoomRef.current;
 
-      // Apply viewport transformation
       ctx.translate(cx + currentPan.x, cy + currentPan.y);
       ctx.scale(currentZoom, currentZoom);
 
@@ -255,7 +284,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
       // --- 1. Physics Engine (Force-Directed Graph) ---
       const hostNode = nodes.find(n => n.isHost);
 
-      // Repulsion between all nodes (Coulomb's Law)
+      // Node-to-node Coulomb Repulsion
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i];
@@ -263,9 +292,9 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const minDist = a.radius + b.radius + 60;
+          const minDist = a.radius + b.radius + 70;
 
-          if (dist < minDist * 3) {
+          if (dist < minDist * 2.5) {
             const force = (minDist * minDist) / (dist * dist) * 0.45;
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
@@ -284,7 +313,6 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
 
       // Spring links: Host to all spoke Peers (Hooke's Law)
       if (hostNode) {
-        // Keep host near center if not dragged
         if (isDraggingNode.current !== hostNode.id) {
           hostNode.vx -= hostNode.x * 0.05;
           hostNode.vy -= hostNode.y * 0.05;
@@ -304,7 +332,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
         });
       }
 
-      // Direct P2P Bypass links attraction between non-host peers
+      // Direct P2P Bypass links attraction
       nodes.forEach(node => {
         if (node.peer.bypassPeers && node.peer.bypassPeers.length > 0) {
           node.peer.bypassPeers.forEach(bypassId => {
@@ -328,7 +356,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
         if (isDraggingNode.current !== node.id) {
           node.x += node.vx;
           node.y += node.vy;
-          node.vx *= 0.82; // Damping
+          node.vx *= 0.82;
           node.vy *= 0.82;
         }
       });
@@ -353,6 +381,11 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
       }
       ctx.restore();
 
+      // Active Call Nodes lookup
+      const isCallActive = Boolean(activeCall && activeCall.active);
+      const callCallerNode = isCallActive ? nodesRef.current.get(activeCall!.callerId) : null;
+      const callTargetNode = isCallActive ? nodesRef.current.get(activeCall!.targetId) : null;
+
       // --- 3. Topology Rendering ---
       // A. Solid lines from Host node to all connected Peer nodes
       if (hostNode) {
@@ -362,7 +395,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
             ctx.beginPath();
             ctx.moveTo(hostNode.x, hostNode.y);
             ctx.lineTo(node.x, node.y);
-            ctx.strokeStyle = 'rgba(59, 130, 246, 0.45)'; // Solid link
+            ctx.strokeStyle = 'rgba(59, 130, 246, 0.45)';
             ctx.lineWidth = 2;
             ctx.stroke();
             ctx.restore();
@@ -383,27 +416,77 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
                 ctx.save();
                 ctx.beginPath();
                 ctx.setLineDash([8, 6]);
-                ctx.lineDashOffset = -tick * 0.8; // Animated marching dash
+                ctx.lineDashOffset = -tick * 0.8;
                 ctx.moveTo(node.x, node.y);
                 ctx.lineTo(targetNode.x, targetNode.y);
-                ctx.strokeStyle = 'rgba(16, 185, 129, 0.85)'; // Emerald dashed bypass line
+                ctx.strokeStyle = 'rgba(16, 185, 129, 0.85)';
                 ctx.lineWidth = 2.5;
                 ctx.stroke();
 
-                // "BYPASS" label at midpoint
+                // Multiplexed Midpoint Label
                 const midX = (node.x + targetNode.x) / 2;
                 const midY = (node.y + targetNode.y) / 2;
                 ctx.setLineDash([]);
                 ctx.font = '10px "JetBrains Mono", monospace';
-                ctx.fillStyle = '#10B981';
                 ctx.textAlign = 'center';
-                ctx.fillText('⚡ DIRECT BYPASS', midX, midY - 6);
+
+                // Check concurrent states on this link
+                const isPairInCall = isCallActive &&
+                  ((activeCall!.callerId === node.id && activeCall!.targetId === peerId) ||
+                   (activeCall!.callerId === peerId && activeCall!.targetId === node.id));
+
+                const activeBatchForLink = activeBatches ? (Array.from(activeBatches.values()) as BatchTransferState[]).find(
+                  b => (b.targetId === node.id || b.targetId === peerId) && (b.status === 'streaming' || b.status === 'accepted')
+                ) : null;
+
+                if (isPairInCall && activeBatchForLink) {
+                  ctx.fillStyle = '#F43F5E';
+                  ctx.fillText(`⚡ DIRECT BYPASS • 📹 LIVE CALL • 📦 BATCH (${activeBatchForLink.progress}%)`, midX, midY - 8);
+                } else if (isPairInCall) {
+                  ctx.fillStyle = '#F43F5E';
+                  ctx.fillText('⚡ DIRECT BYPASS • 📹 LIVE CALL STREAM', midX, midY - 8);
+                } else if (activeBatchForLink) {
+                  ctx.fillStyle = '#10B981';
+                  ctx.fillText(`⚡ DIRECT BYPASS • 📦 BATCH (${activeBatchForLink.progress}%)`, midX, midY - 8);
+                } else {
+                  ctx.fillStyle = '#10B981';
+                  ctx.fillText('⚡ DIRECT BYPASS', midX, midY - 6);
+                }
                 ctx.restore();
               }
             }
           });
         }
       });
+
+      // C. Active Call A/V Media Energy Aura (Multiplexed on the connection)
+      if (isCallActive && callCallerNode && callTargetNode) {
+        ctx.save();
+        const callDist = Math.hypot(callTargetNode.x - callCallerNode.x, callTargetNode.y - callCallerNode.y) || 1;
+        const steps = Math.max(12, Math.floor(callDist / 8));
+
+        ctx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const nx = callCallerNode.x + (callTargetNode.x - callCallerNode.x) * t;
+          const ny = callCallerNode.y + (callTargetNode.y - callCallerNode.y) * t;
+          const perpX = -(callTargetNode.y - callCallerNode.y) / callDist;
+          const perpY = (callTargetNode.x - callCallerNode.x) / callDist;
+          const wave = Math.sin(t * Math.PI * 6 - tick * 0.18) * 8;
+          const px = nx + perpX * wave;
+          const py = ny + perpY * wave;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+
+        const auraColor = activeCall!.callType === 'video' ? 'rgba(244, 63, 94, 0.9)' : 'rgba(168, 85, 247, 0.9)';
+        ctx.strokeStyle = auraColor;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = activeCall!.callType === 'video' ? '#F43F5E' : '#A855F7';
+        ctx.shadowBlur = 14;
+        ctx.stroke();
+        ctx.restore();
+      }
 
       // --- 4. Render Animated Data Pulses for Active Transfers ---
       if (activeTransfers && activeTransfers.size > 0) {
@@ -421,10 +504,10 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
 
                 ctx.save();
                 ctx.beginPath();
-                ctx.arc(px, py, 4, 0, Math.PI * 2);
+                ctx.arc(px, py, 4.5, 0, Math.PI * 2);
                 ctx.fillStyle = transfer.isBypass ? '#10B981' : '#38BDF8';
                 ctx.shadowColor = transfer.isBypass ? '#10B981' : '#38BDF8';
-                ctx.shadowBlur = 10;
+                ctx.shadowBlur = 12;
                 ctx.fill();
                 ctx.restore();
               }
@@ -440,6 +523,14 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
         const isDropTarget = dropTargetNodeId === node.id;
         const isLocal = node.id === localPeer.id;
 
+        // Check if this node is in an active call
+        const isNodeInCall = isCallActive && (activeCall!.callerId === node.id || activeCall!.targetId === node.id);
+
+        // Check if this node has active batch transfer
+        const nodeBatch = activeBatches ? (Array.from(activeBatches.values()) as BatchTransferState[]).find(
+          b => (b.targetId === node.id || (isLocal && b.status === 'streaming')) && (b.status === 'streaming' || b.status === 'accepted')
+        ) : null;
+
         ctx.save();
 
         // Pulsing radar ring for Host node
@@ -449,6 +540,30 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
           ctx.arc(node.x, node.y, node.radius + pulse * 28, 0, Math.PI * 2);
           ctx.strokeStyle = `rgba(59, 130, 246, ${0.7 * (1 - pulse)})`;
           ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+
+        // Active Call Glowing Halo & Media Aura
+        if (isNodeInCall) {
+          const auraPulse = (tick % 50) / 50;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 8 + auraPulse * 18, 0, Math.PI * 2);
+          ctx.strokeStyle = activeCall!.callType === 'video'
+            ? `rgba(244, 63, 94, ${0.85 * (1 - auraPulse)})`
+            : `rgba(168, 85, 247, ${0.85 * (1 - auraPulse)})`;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
+
+        // Batch Progress Ring (Concurrently rendered around node)
+        if (nodeBatch) {
+          const progRatio = Math.max(0.05, nodeBatch.progress / 100);
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progRatio);
+          ctx.strokeStyle = '#10B981';
+          ctx.lineWidth = 3.5;
+          ctx.shadowColor = '#10B981';
+          ctx.shadowBlur = 10;
           ctx.stroke();
         }
 
@@ -490,14 +605,23 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
           grad.addColorStop(1, '#047857');
         }
         ctx.fillStyle = grad;
-        ctx.shadowColor = node.isHost ? '#3B82F6' : '#10B981';
-        ctx.shadowBlur = isHovered ? 18 : 8;
+        ctx.shadowColor = isNodeInCall ? '#F43F5E' : node.isHost ? '#3B82F6' : '#10B981';
+        ctx.shadowBlur = isNodeInCall ? 22 : isHovered ? 18 : 8;
         ctx.fill();
 
         // Inner Border
         ctx.lineWidth = 2;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.strokeStyle = isNodeInCall ? '#FECDD3' : 'rgba(255, 255, 255, 0.8)';
         ctx.stroke();
+
+        // Live Call Badge on top of Node
+        if (isNodeInCall) {
+          ctx.font = 'bold 9px "JetBrains Mono", monospace';
+          ctx.fillStyle = activeCall!.callType === 'video' ? '#F43F5E' : '#A855F7';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(activeCall!.callType === 'video' ? '📹 VIDEO' : '🎙️ AUDIO', node.x, node.y - node.radius - 6);
+        }
 
         // Node Label Initial
         ctx.font = `bold ${node.isHost ? 14 : 12}px sans-serif`;
@@ -517,8 +641,14 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
 
         // Node Role / Status Badge
         ctx.font = '9px "JetBrains Mono", monospace';
-        ctx.fillStyle = node.isHost ? '#60A5FA' : '#34D399';
-        const roleText = node.isHost ? '● CENTRAL HOST' : isDropTarget ? 'DROP FILE HERE' : '● PEER';
+        ctx.fillStyle = node.isHost ? '#60A5FA' : nodeBatch ? '#10B981' : '#34D399';
+        const roleText = node.isHost
+          ? '● CENTRAL HOST'
+          : isDropTarget
+          ? 'DROP FILES HERE'
+          : nodeBatch
+          ? `SYNCING ${nodeBatch.progress}%`
+          : '● PEER';
         ctx.fillText(roleText, node.x, node.y + node.radius + 20);
 
         ctx.restore();
@@ -537,9 +667,8 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [localPeer, hoveredNode, selectedNodeId, dropTargetNodeId, activeTransfers]);
+  }, [localPeer, hoveredNode, selectedNodeId, dropTargetNodeId, activeTransfers, activeBatches, activeCall]);
 
-  // Reset view to center
   const handleResetView = () => {
     setPan({ x: 0, y: 0 });
     setZoom(1);
@@ -551,7 +680,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
     <div ref={containerRef} className="relative w-full h-full min-h-[460px] bg-slate-950/80 backdrop-blur-xl rounded-3xl overflow-hidden border border-white/10 shadow-2xl flex flex-col select-none">
       {/* Top HUD Controls */}
       <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
-        <div className="flex items-center gap-3 bg-black/60 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-white/10 shadow-lg pointer-events-auto">
+        <div className="flex items-center gap-3 bg-black/60 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-white/10 shadow-lg pointer-events-auto flex-wrap">
           <div className="flex items-center gap-2">
             <Radio className="w-4 h-4 text-accent animate-pulse" />
             <span className="text-xs font-semibold text-white tracking-wide">Nexus Mesh Topology</span>
@@ -565,28 +694,34 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
               Host: {hostId === localPeer.id ? 'You' : hostId.substring(0, 6)}
             </span>
           )}
+          {activeCall && activeCall.active && (
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1 animate-pulse">
+              {activeCall.callType === 'video' ? <Video className="w-3 h-3" /> : <Phone className="w-3 h-3" />}
+              Live {activeCall.callType === 'video' ? 'Video' : 'Audio'}: {activeCall.callerName} ↔ {activeCall.targetName}
+            </span>
+          )}
         </div>
 
         {/* Viewport Zoom / Reset Controls */}
-        <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-md p-1 rounded-2xl border border-white/10 shadow-lg pointer-events-auto">
+        <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-md p-1.5 rounded-2xl border border-white/10 shadow-lg pointer-events-auto">
           <button
-            onClick={() => setZoom(z => Math.min(3.5, z * 1.2))}
-            className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+            onClick={() => setZoom(z => Math.min(2.5, z * 1.2))}
+            className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
             title="Zoom In"
           >
             <ZoomIn className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setZoom(z => Math.max(0.35, z / 1.2))}
-            className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+            onClick={() => setZoom(z => Math.max(0.35, z * 0.8))}
+            className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
             title="Zoom Out"
           >
             <ZoomOut className="w-4 h-4" />
           </button>
           <button
             onClick={handleResetView}
-            className="p-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
-            title="Reset Pan & Zoom"
+            className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            title="Reset View"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -625,7 +760,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
             <div>Bypass Links: <span className="text-emerald-400">{hoveredNode.peer.bypassPeers?.length || 0} active</span></div>
             <div className="text-[10px] text-accent pt-1 flex items-center gap-1">
               <Zap className="w-3 h-3" />
-              <span>Drag & drop files onto node to send</span>
+              <span>Drag & drop files onto node to start batch transfer</span>
             </div>
           </div>
         </div>
@@ -648,7 +783,7 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
       {dropTargetNodeId && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 bg-emerald-500/90 text-white px-4 py-2 rounded-2xl shadow-xl flex items-center gap-2 text-xs font-medium animate-bounce pointer-events-none">
           <HardDrive className="w-4 h-4" />
-          <span>Release to send file directly to {nodesRef.current.get(dropTargetNodeId)?.peer.username}!</span>
+          <span>Release to send files directly to {nodesRef.current.get(dropTargetNodeId)?.peer.username}!</span>
         </div>
       )}
     </div>

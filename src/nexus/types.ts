@@ -44,6 +44,55 @@ export interface NexusCall {
   remoteStream?: MediaStream;
 }
 
+export interface FileManifestItem {
+  index: number;
+  name: string;
+  size: number;
+  mimeType: string;
+}
+
+export interface BatchManifest {
+  batchId: string;
+  senderId: string;
+  senderName: string;
+  targetId: string;
+  totalFiles: number;
+  totalBytes: number;
+  files: FileManifestItem[];
+}
+
+export interface BatchTransferState {
+  batchId: string;
+  targetId: string;
+  targetName?: string;
+  direction: 'outgoing' | 'incoming';
+  status: 'queued' | 'negotiating' | 'accepted' | 'streaming' | 'completed' | 'failed' | 'rejected';
+  totalFiles: number;
+  totalBytes: number;
+  transferredBytes: number;
+  currentFileIndex: number;
+  currentFileName: string;
+  progress: number; // 0 to 100
+  speed: string;
+  files: {
+    name: string;
+    size: number;
+    mimeType: string;
+    status: 'pending' | 'transferring' | 'completed' | 'failed';
+    progress: number;
+  }[];
+}
+
+export interface ConcurrentBypassState {
+  targetId: string;
+  targetName?: string;
+  isCalling: boolean;
+  callType?: 'audio' | 'video';
+  hasActiveBatch: boolean;
+  batchProgress?: number;
+  isHostLink: boolean;
+}
+
 export interface NodePosition {
   id: string;
   x: number;

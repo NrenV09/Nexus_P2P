@@ -1,5 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { NexusPeer, NexusTransfer, NexusLog, NexusCall } from './types';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import {
+  NexusPeer,
+  NexusTransfer,
+  NexusLog,
+  NexusCall,
+  BatchTransferState,
+  ConcurrentBypassState
+} from './types';
+import { BatchTransferManager } from './BatchTransferManager';
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -7,8 +15,6 @@ const RTC_CONFIG: RTCConfiguration = {
     { urls: 'stun:global.stun.twilio.com:3478' }
   ]
 };
-
-const CHUNK_SIZE = 32 * 1024; // 32 KB chunk for optimal DataChannel throughput
 
 export interface UseNexusRTCOptions {
   wsUrl?: string;
@@ -42,18 +48,26 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
   const [hostId, setHostId] = useState<string>('');
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [activeTransfers, setActiveTransfers] = useState<Map<string, NexusTransfer>>(new Map());
+  const [activeBatches, setActiveBatches] = useState<Map<string, BatchTransferState>>(new Map());
   const [logs, setLogs] = useState<NexusLog[]>([]);
   const [activeCall, setActiveCall] = useState<NexusCall | null>(null);
 
-  // References
+  // Connection References
   const wsRef = useRef<WebSocket | null>(null);
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const dataChannels = useRef<Map<string, RTCDataChannel>>(new Map());
   const bypassConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const bypassDataChannels = useRef<Map<string, RTCDataChannel>>(new Map());
+
+  // Multiplexed Channel Isolation: Chat vs File Transfer
+  const chatChannels = useRef<Map<string, RTCDataChannel>>(new Map());
+  const fileChannels = useRef<Map<string, RTCDataChannel>>(new Map());
+  const batchManagers = useRef<Map<string, BatchTransferManager>>(new Map());
+
+  // WebRTC Perfect Negotiation State Tracker per peer
+  const makingOfferMap = useRef<Map<string, boolean>>(new Map());
+  const ignoreOfferMap = useRef<Map<string, boolean>>(new Map());
+
+  // Local A/V Media Stream Reference
   const localStreamRef = useRef<MediaStream | null>(null);
-  const activeTransfersRef = useRef<Map<string, NexusTransfer>>(new Map());
-  const receivingBuffers = useRef<Map<string, { chunks: ArrayBuffer[]; received: number; total: number; name: string; from: string }>>(new Map());
 
   // Helper: Append log
   const addLog = useCallback((type: NexusLog['type'], text: string, source?: string, metadata?: Record<string, any>) => {
@@ -65,7 +79,7 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
       source: source || 'Signaling',
       metadata
     };
-    setLogs(prev => [...prev.slice(-250), newLog]);
+    setLogs(prev => [...prev.slice(-300), newLog]);
   }, []);
 
   // Send message over WebSocket signaling
@@ -83,12 +97,12 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     }
   }, [roomId, localPeer.id, localPeer.username]);
 
-  // Setup DataChannel listeners
-  const setupDataChannel = useCallback((dc: RTCDataChannel, remotePeerId: string, isBypass: boolean = false) => {
-    dc.binaryType = 'arraybuffer';
+  // Setup isolated Control/Chat DataChannel (label: 'nexus-chat')
+  const setupChatDataChannel = useCallback((dc: RTCDataChannel, remotePeerId: string, isBypass: boolean = false) => {
+    chatChannels.current.set(remotePeerId, dc);
 
     dc.onopen = () => {
-      addLog('connection', `DataChannel opened with ${remotePeerId} ${isBypass ? '(Direct Bypass)' : ''}`, remotePeerId);
+      addLog('connection', `Control/Chat channel [nexus-chat] opened with ${remotePeerId} ${isBypass ? '(Direct Bypass)' : ''}`, remotePeerId);
       setPeers(prev => {
         const next = new Map(prev);
         const p = next.get(remotePeerId) as NexusPeer | undefined;
@@ -104,239 +118,269 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     };
 
     dc.onclose = () => {
-      addLog('connection', `DataChannel closed with ${remotePeerId}`, remotePeerId);
+      addLog('connection', `Control/Chat channel closed with ${remotePeerId}`, remotePeerId);
+      chatChannels.current.delete(remotePeerId);
     };
 
     dc.onerror = (err: any) => {
-      addLog('error', `DataChannel error with ${remotePeerId}: ${err?.message || 'unknown'}`, remotePeerId);
+      addLog('error', `Chat channel error with ${remotePeerId}: ${err?.message || 'unknown'}`, remotePeerId);
     };
 
     dc.onmessage = (event) => {
-      // 1. If string: control/chat message
       if (typeof event.data === 'string') {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === 'file-meta') {
-            // Incoming file header
-            const { transferId, name, size } = msg;
-            receivingBuffers.current.set(transferId, {
-              chunks: [],
-              received: 0,
-              total: size,
-              name,
-              from: remotePeerId
-            });
-
-            const transferObj: NexusTransfer = {
-              id: transferId,
-              fileName: name,
-              fileSize: size,
-              progress: 0,
-              speed: 'Connecting...',
-              fromPeerId: remotePeerId,
-              toPeerId: localPeer.id,
-              isBypass,
-              status: 'active',
-              transferredBytes: 0
-            };
-
-            setActiveTransfers(prev => new Map(prev).set(transferId, transferObj));
-            activeTransfersRef.current.set(transferId, transferObj);
-            addLog('transfer', `Incoming transfer: "${name}" (${(size / (1024 * 1024)).toFixed(2)} MB) from ${remotePeerId}`, remotePeerId);
-          } else if (msg.type === 'transfer-complete') {
-            const { transferId } = msg;
-            const buf = receivingBuffers.current.get(transferId);
-            if (buf) {
-              const blob = new Blob(buf.chunks);
-              const file = new File([blob], buf.name);
-              const senderPeer = peers.get(buf.from) || {
-                id: buf.from,
-                username: `Peer-${buf.from.substring(0, 4)}`,
-                avatarColor: 'bg-accent',
-                isHost: buf.from === hostId,
-                joinedAt: Date.now(),
-                status: 'connected',
-                bypassPeers: []
-              };
-
-              addLog('transfer', `Received "${buf.name}" successfully! Saved to memory.`, buf.from);
-              onFileReceived?.(file, senderPeer);
-              receivingBuffers.current.delete(transferId);
-
-              setActiveTransfers(prev => {
-                const next = new Map(prev);
-                const t = next.get(transferId) as NexusTransfer | undefined;
-                if (t) next.set(transferId, { ...t, progress: 100, status: 'completed' });
-                return next;
-              });
-
-              setTimeout(() => {
-                setActiveTransfers(prev => {
-                  const next = new Map(prev);
-                  next.delete(transferId);
-                  return next;
-                });
-              }, 4000);
-            }
+          if (msg.type === 'chat') {
+            addLog('chat', `${msg.senderName || remotePeerId}: ${msg.text}`, remotePeerId);
           }
-        } catch (_) {}
-        return;
-      }
-
-      // 2. If ArrayBuffer: chunk of file
-      if (event.data instanceof ArrayBuffer) {
-        // First 36 bytes contains transferId string
-        const transferIdBytes = new Uint8Array(event.data, 0, 36);
-        const transferId = new TextDecoder().decode(transferIdBytes).trim();
-        const chunkData = event.data.slice(36);
-
-        const buf = receivingBuffers.current.get(transferId);
-        if (buf) {
-          buf.chunks.push(chunkData);
-          buf.received += chunkData.byteLength;
-          const progress = Math.min(100, Math.round((buf.received / buf.total) * 100));
-
-          setActiveTransfers(prev => {
-            const next = new Map(prev);
-            const t = next.get(transferId) as NexusTransfer | undefined;
-            if (t) {
-              next.set(transferId, {
-                ...t,
-                progress,
-                transferredBytes: buf.received,
-                speed: `${(chunkData.byteLength / 1024).toFixed(0)} KB/pkt`
-              });
-            }
-            return next;
-          });
+        } catch {
+          addLog('chat', `${remotePeerId}: ${event.data}`, remotePeerId);
         }
       }
     };
-  }, [addLog, localPeer.id, onFileReceived, peers, hostId]);
+  }, [addLog, localPeer.id]);
 
-  // Create standard WebRTC connection with a peer
-  const createPeerConnection = useCallback((remotePeerId: string, isInitiator: boolean) => {
-    if (peerConnections.current.has(remotePeerId)) {
-      return peerConnections.current.get(remotePeerId)!;
-    }
+  // Setup isolated File Transfer DataChannel (label: 'nexus-file-transfer')
+  const setupFileDataChannel = useCallback((dc: RTCDataChannel, remotePeerId: string, isBypass: boolean = false) => {
+    fileChannels.current.set(remotePeerId, dc);
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
-    peerConnections.current.set(remotePeerId, pc);
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        sendSignal('signal-ice', remotePeerId, event.candidate);
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      addLog('connection', `Connection to ${remotePeerId}: ${pc.connectionState}`, remotePeerId);
-      setPeers(prev => {
-        const next = new Map(prev);
-        const p = next.get(remotePeerId) as NexusPeer | undefined;
-        if (p) {
-          next.set(remotePeerId, {
-            ...p,
-            status: pc.connectionState === 'connected' ? 'connected' : 'connecting'
-          });
-        }
-        return next;
-      });
-    };
-
-    // If active call stream exists, attach tracks
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current!);
-      });
-    }
-
-    pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        setActiveCall(prev => prev ? { ...prev, remoteStream: event.streams[0] } : null);
-      }
-    };
-
-    if (isInitiator) {
-      const dc = pc.createDataChannel('nexus-data');
-      dataChannels.current.set(remotePeerId, dc);
-      setupDataChannel(dc, remotePeerId, false);
-
-      pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
-        sendSignal('signal-offer', remotePeerId, pc.localDescription);
-      }).catch(err => {
-        addLog('error', `Failed to create offer: ${err.message}`, remotePeerId);
-      });
+    // Instantiate or update standalone BatchTransferManager attached to this channel
+    const existingManager = batchManagers.current.get(remotePeerId);
+    if (existingManager) {
+      existingManager.updateChannel(dc);
     } else {
-      pc.ondatachannel = (event) => {
-        const dc = event.channel;
-        dataChannels.current.set(remotePeerId, dc);
-        setupDataChannel(dc, remotePeerId, false);
-      };
+      const manager = new BatchTransferManager(dc, localPeer.id, localPeer.username, {
+        onStateChange: (state) => {
+          setActiveBatches(prev => new Map(prev).set(state.batchId, state));
+
+          // Also mirror individual files to activeTransfers for single file displays
+          state.files.forEach((f, idx) => {
+            const transferId = `${state.batchId}-${idx}`;
+            if (f.status === 'transferring' || f.status === 'completed') {
+              setActiveTransfers(prev => new Map(prev).set(transferId, {
+                id: transferId,
+                fileName: f.name,
+                fileSize: f.size,
+                progress: f.progress,
+                speed: state.speed,
+                fromPeerId: state.direction === 'outgoing' ? localPeer.id : remotePeerId,
+                toPeerId: state.direction === 'outgoing' ? remotePeerId : localPeer.id,
+                isBypass,
+                status: f.status === 'completed' ? 'completed' : 'active',
+                transferredBytes: Math.round((f.progress / 100) * f.size)
+              }));
+            }
+          });
+        },
+        onFileReceived: (file, batchId, fileIndex) => {
+          const senderPeer = peers.get(remotePeerId) || {
+            id: remotePeerId,
+            username: `Node-${remotePeerId.substring(0, 4)}`,
+            avatarColor: 'bg-accent',
+            isHost: remotePeerId === hostId,
+            joinedAt: Date.now(),
+            status: 'connected',
+            bypassPeers: []
+          };
+          onFileReceived?.(file, senderPeer);
+        },
+        onBatchCompleted: (batchId, direction) => {
+          setTimeout(() => {
+            setActiveBatches(prev => {
+              const next = new Map(prev);
+              next.delete(batchId);
+              return next;
+            });
+          }, 4000);
+        },
+        onLog: (type, text, metadata) => {
+          const peer = peers.get(remotePeerId);
+          addLog(type, text, peer?.username || remotePeerId, metadata);
+        }
+      });
+
+      batchManagers.current.set(remotePeerId, manager);
     }
 
-    return pc;
-  }, [addLog, sendSignal, setupDataChannel]);
+    addLog('connection', `File Transfer channel [nexus-file-transfer] ready with ${remotePeerId}`, remotePeerId);
+  }, [peers, localPeer.id, localPeer.username, hostId, onFileReceived, addLog]);
 
-  // Create direct Peer-to-Peer Bypass WebRTC Connection between two non-host peers
-  const createBypassConnection = useCallback((remotePeerId: string, isInitiator: boolean) => {
-    if (bypassConnections.current.has(remotePeerId)) {
-      return bypassConnections.current.get(remotePeerId)!;
+  // Core Helper: Create/Configure RTCPeerConnection with Dynamic Renegotiation & Channel Isolation
+  const createConnection = useCallback((remotePeerId: string, isInitiator: boolean, isBypass: boolean) => {
+    const connectionMap = isBypass ? bypassConnections.current : peerConnections.current;
+    if (connectionMap.has(remotePeerId)) {
+      return connectionMap.get(remotePeerId)!;
     }
 
-    addLog('signaling', `Negotiating direct P2P bypass connection with ${remotePeerId}...`, remotePeerId);
+    addLog('signaling', `Creating ${isBypass ? 'Direct P2P Bypass' : 'Host Topology'} connection with ${remotePeerId}...`, remotePeerId);
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
-    bypassConnections.current.set(remotePeerId, pc);
+    connectionMap.set(remotePeerId, pc);
 
+    makingOfferMap.current.set(remotePeerId, false);
+    ignoreOfferMap.current.set(remotePeerId, false);
+
+    // ICE Candidate generation
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        sendSignal('bypass-ice', remotePeerId, event.candidate);
+        sendSignal(isBypass ? 'bypass-ice' : 'signal-ice', remotePeerId, event.candidate);
       }
     };
 
+    // Connection State Changes
     pc.onconnectionstatechange = () => {
-      addLog('connection', `Bypass link to ${remotePeerId}: ${pc.connectionState}`, remotePeerId);
+      addLog('connection', `${isBypass ? 'Bypass' : 'Standard'} link to ${remotePeerId}: ${pc.connectionState}`, remotePeerId);
       if (pc.connectionState === 'connected') {
-        // Mark bypass active
         setPeers(prev => {
           const next = new Map(prev);
           const p = next.get(remotePeerId) as NexusPeer | undefined;
           if (p) {
             next.set(remotePeerId, {
               ...p,
-              bypassPeers: Array.from(new Set([...p.bypassPeers, localPeer.id]))
+              status: 'connected',
+              bypassPeers: isBypass ? Array.from(new Set([...p.bypassPeers, localPeer.id])) : p.bypassPeers
             });
           }
           return next;
         });
-        setLocalPeer(prev => ({
-          ...prev,
-          bypassPeers: Array.from(new Set([...prev.bypassPeers, remotePeerId]))
-        }));
+
+        if (isBypass) {
+          setLocalPeer(prev => ({
+            ...prev,
+            bypassPeers: Array.from(new Set([...prev.bypassPeers, remotePeerId]))
+          }));
+        }
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        if (isBypass) {
+          setLocalPeer(prev => ({
+            ...prev,
+            bypassPeers: prev.bypassPeers.filter(id => id !== remotePeerId)
+          }));
+        }
       }
     };
 
-    if (isInitiator) {
-      const dc = pc.createDataChannel('nexus-bypass-data');
-      bypassDataChannels.current.set(remotePeerId, dc);
-      setupDataChannel(dc, remotePeerId, true);
+    // Dynamic Incoming Media Tracks (Audio / Video Call)
+    pc.ontrack = (event) => {
+      if (event.streams && event.streams[0]) {
+        addLog('call', `Incoming media stream received from ${remotePeerId}`, remotePeerId);
+        setActiveCall(prev => prev ? { ...prev, remoteStream: event.streams[0] } : null);
+      }
+    };
 
-      pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
-        sendSignal('bypass-offer', remotePeerId, pc.localDescription);
-      }).catch(err => {
-        addLog('error', `Failed bypass offer: ${err.message}`, remotePeerId);
+    // Dynamic Perfect Negotiation: onnegotiationneeded handler
+    // Handles adding/removing media tracks, new data channels without interrupting ongoing file streams!
+    pc.onnegotiationneeded = async () => {
+      try {
+        makingOfferMap.current.set(remotePeerId, true);
+        await pc.setLocalDescription();
+        sendSignal(isBypass ? 'bypass-offer' : 'signal-offer', remotePeerId, pc.localDescription);
+      } catch (err: any) {
+        console.error(`onnegotiationneeded error with ${remotePeerId}:`, err);
+      } finally {
+        makingOfferMap.current.set(remotePeerId, false);
+      }
+    };
+
+    // Handle Incoming Isolated DataChannels
+    pc.ondatachannel = (event) => {
+      const dc = event.channel;
+      if (dc.label === 'nexus-chat') {
+        setupChatDataChannel(dc, remotePeerId, isBypass);
+      } else if (dc.label === 'nexus-file-transfer') {
+        setupFileDataChannel(dc, remotePeerId, isBypass);
+      } else {
+        // Fallback for legacy or custom labels
+        if (dc.label.includes('file')) {
+          setupFileDataChannel(dc, remotePeerId, isBypass);
+        } else {
+          setupChatDataChannel(dc, remotePeerId, isBypass);
+        }
+      }
+    };
+
+    // If active local call stream already exists, attach tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current!);
       });
-    } else {
-      pc.ondatachannel = (event) => {
-        const dc = event.channel;
-        bypassDataChannels.current.set(remotePeerId, dc);
-        setupDataChannel(dc, remotePeerId, true);
-      };
+    }
+
+    // Channel Isolation: Initiator pre-creates isolated channels for Chat and File Transfers
+    if (isInitiator) {
+      const chatDc = pc.createDataChannel('nexus-chat');
+      setupChatDataChannel(chatDc, remotePeerId, isBypass);
+
+      const fileDc = pc.createDataChannel('nexus-file-transfer');
+      setupFileDataChannel(fileDc, remotePeerId, isBypass);
     }
 
     return pc;
-  }, [addLog, localPeer.id, sendSignal, setupDataChannel]);
+  }, [addLog, localPeer.id, sendSignal, setupChatDataChannel, setupFileDataChannel]);
+
+  // Specific Get-or-Create functions
+  const getOrCreatePeerConnection = useCallback((remotePeerId: string, isInitiator: boolean) => {
+    return createConnection(remotePeerId, isInitiator, false);
+  }, [createConnection]);
+
+  const getOrCreateBypassConnection = useCallback((remotePeerId: string, isInitiator: boolean) => {
+    return createConnection(remotePeerId, isInitiator, true);
+  }, [createConnection]);
+
+  // WebRTC Perfect Negotiation Offer Receiver
+  const handleIncomingOffer = useCallback(async (senderId: string, description: RTCSessionDescriptionInit, isBypass: boolean) => {
+    const pc = isBypass
+      ? getOrCreateBypassConnection(senderId, false)
+      : getOrCreatePeerConnection(senderId, false);
+
+    // Polite peer determination: Peer ID with lexicographically lower value yields to collision
+    const isPolite = localPeer.id < senderId;
+    const isMakingOffer = makingOfferMap.current.get(senderId) || false;
+    const offerCollision = (description.type === 'offer') && (isMakingOffer || pc.signalingState !== 'stable');
+
+    if (!isPolite && offerCollision) {
+      ignoreOfferMap.current.set(senderId, true);
+      addLog('signaling', `Glare collision resolved (impolite peer ignored collision offer from ${senderId})`, senderId);
+      return;
+    }
+    ignoreOfferMap.current.set(senderId, false);
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(description));
+      if (description.type === 'offer') {
+        await pc.setLocalDescription();
+        sendSignal(isBypass ? 'bypass-answer' : 'signal-answer', senderId, pc.localDescription);
+      }
+    } catch (err: any) {
+      console.error(`Error handling offer from ${senderId}:`, err);
+    }
+  }, [addLog, getOrCreateBypassConnection, getOrCreatePeerConnection, localPeer.id, sendSignal]);
+
+  // WebRTC Answer Receiver
+  const handleIncomingAnswer = useCallback(async (senderId: string, description: RTCSessionDescriptionInit, isBypass: boolean) => {
+    const pc = isBypass ? bypassConnections.current.get(senderId) : peerConnections.current.get(senderId);
+    if (pc) {
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(description));
+      } catch (err: any) {
+        console.error(`Error setting remote answer from ${senderId}:`, err);
+      }
+    }
+  }, []);
+
+  // WebRTC ICE Candidate Receiver
+  const handleIncomingIce = useCallback(async (senderId: string, candidate: RTCIceCandidateInit, isBypass: boolean) => {
+    const pc = isBypass ? bypassConnections.current.get(senderId) : peerConnections.current.get(senderId);
+    if (pc && candidate) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err: any) {
+        if (!ignoreOfferMap.current.get(senderId)) {
+          console.error(`Error adding ICE candidate from ${senderId}:`, err);
+        }
+      }
+    }
+  }, []);
 
   // Connect WebSocket signaling
   useEffect(() => {
@@ -404,9 +448,9 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
 
                 addLog('signaling', `Room state loaded. Central Host: ${amIHost ? 'You (Local)' : currentHostId}. Peers: ${peerMap.size}`);
 
-                // If I am Host, wait for peers to connect or if Peer, connect to Host
+                // If I am not host, connect with Host
                 if (!amIHost && currentHostId) {
-                  createPeerConnection(currentHostId, true);
+                  getOrCreatePeerConnection(currentHostId, true);
                 }
                 break;
               }
@@ -426,9 +470,9 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
                 setPeers(prev => new Map(prev).set(senderId, newPeer));
                 addLog('connection', `Peer joined: ${newPeer.username} (${senderId})`, senderId);
 
-                // If I am Host, connect with this new peer
+                // If I am central Host, initiate connection
                 if (localPeer.isHost) {
-                  createPeerConnection(senderId, true);
+                  getOrCreatePeerConnection(senderId, true);
                 }
                 break;
               }
@@ -445,77 +489,54 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
                   setHostId(newHostId);
                   if (newHostId === localPeer.id) {
                     setLocalPeer(prev => ({ ...prev, isHost: true }));
-                    addLog('connection', `Host disconnected! You are promoted to central Host node.`, 'Failover');
+                    addLog('connection', `Host disconnected! You are elected central Host.`, 'Failover');
                   } else {
-                    addLog('connection', `Host disconnected! New Host elected: ${newHostId}`, 'Failover');
+                    addLog('connection', `Host disconnected! New Host: ${newHostId}`, 'Failover');
                   }
                 }
 
-                // Cleanup connections
+                // Cleanup connections and channels
                 peerConnections.current.get(leftPeerId)?.close();
                 peerConnections.current.delete(leftPeerId);
-                dataChannels.current.delete(leftPeerId);
                 bypassConnections.current.get(leftPeerId)?.close();
                 bypassConnections.current.delete(leftPeerId);
-                bypassDataChannels.current.delete(leftPeerId);
+                chatChannels.current.delete(leftPeerId);
+                fileChannels.current.delete(leftPeerId);
+                batchManagers.current.delete(leftPeerId);
 
                 addLog('connection', `Peer disconnected: ${leftUsername || leftPeerId}`, leftPeerId);
                 break;
               }
 
-              // Standard WebRTC Handshake
+              // Standard Host WebRTC Handshake
               case 'signal-offer': {
-                const pc = createPeerConnection(senderId, false);
-                await pc.setRemoteDescription(new RTCSessionDescription(payload));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                sendSignal('signal-answer', senderId, answer);
+                await handleIncomingOffer(senderId, payload, false);
                 break;
               }
-
               case 'signal-answer': {
-                const pc = peerConnections.current.get(senderId);
-                if (pc) {
-                  await pc.setRemoteDescription(new RTCSessionDescription(payload));
-                }
+                await handleIncomingAnswer(senderId, payload, false);
                 break;
               }
-
               case 'signal-ice': {
-                const pc = peerConnections.current.get(senderId);
-                if (pc && payload) {
-                  await pc.addIceCandidate(new RTCIceCandidate(payload));
-                }
+                await handleIncomingIce(senderId, payload, false);
                 break;
               }
 
               // Direct P2P Bypass Handshake
               case 'bypass-offer': {
-                const pc = createBypassConnection(senderId, false);
-                await pc.setRemoteDescription(new RTCSessionDescription(payload));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                sendSignal('bypass-answer', senderId, answer);
+                await handleIncomingOffer(senderId, payload, true);
                 break;
               }
-
               case 'bypass-answer': {
-                const pc = bypassConnections.current.get(senderId);
-                if (pc) {
-                  await pc.setRemoteDescription(new RTCSessionDescription(payload));
-                }
+                await handleIncomingAnswer(senderId, payload, true);
                 break;
               }
-
               case 'bypass-ice': {
-                const pc = bypassConnections.current.get(senderId);
-                if (pc && payload) {
-                  await pc.addIceCandidate(new RTCIceCandidate(payload));
-                }
+                await handleIncomingIce(senderId, payload, true);
                 break;
               }
 
-              // Private Call Events broadcasted to everyone
+              // Private Call Events (Broadcasted across room for network-wide logging)
               case 'private-call-start': {
                 const { callerId, callerName, targetId, targetName, callType, callId } = payload;
                 addLog('call', `Broadcast: Private ${callType} call initiated between ${callerName} and ${targetName}`, 'Call Engine', {
@@ -524,7 +545,6 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
                   targetId
                 });
 
-                // If I am the recipient of this call
                 if (targetId === localPeer.id && senderId !== localPeer.id) {
                   setActiveCall({
                     active: true,
@@ -553,11 +573,11 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
               }
             }
           } catch (e) {
-            console.error('Signaling processing error:', e);
+            console.error('Signaling message error:', e);
           }
         };
       } catch (err) {
-        console.error('WS initialization error:', err);
+        console.error('WebSocket connection setup error:', err);
       }
     };
 
@@ -569,141 +589,81 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
       peerConnections.current.forEach(pc => pc.close());
       bypassConnections.current.forEach(pc => pc.close());
     };
-  }, [roomId, localPeer.id, localPeer.username, localPeer.avatarColor, localPeer.isHost, options.wsUrl, addLog, createPeerConnection, createBypassConnection, sendSignal]);
+  }, [roomId, localPeer.id, localPeer.username, localPeer.avatarColor, localPeer.isHost, options.wsUrl, addLog, getOrCreatePeerConnection, handleIncomingOffer, handleIncomingAnswer, handleIncomingIce]);
 
-  // Send Chat message across network
-  const sendMessage = useCallback((text: string) => {
+  // Send Chat message across network or direct peer channel
+  const sendMessage = useCallback((text: string, directTargetId?: string) => {
     if (!text.trim()) return;
-    sendSignal('network-chat', '', { text });
-  }, [sendSignal]);
 
-  // Send File to target peer: uses direct bypass if non-host to non-host, or standard channel
-  const sendFile = useCallback(async (targetPeerId: string, file: File) => {
-    if (!file || !targetPeerId) return;
+    // Check if direct isolated chat channel exists
+    if (directTargetId) {
+      const dc = chatChannels.current.get(directTargetId);
+      if (dc && dc.readyState === 'open') {
+        dc.send(JSON.stringify({
+          type: 'chat',
+          senderId: localPeer.id,
+          senderName: localPeer.username,
+          text,
+          timestamp: Date.now()
+        }));
+        const targetPeer = peers.get(directTargetId);
+        addLog('chat', `[Direct to ${targetPeer?.username || directTargetId}]: ${text}`, directTargetId);
+        return;
+      }
+    }
+
+    // Default broadcast over signaling server
+    sendSignal('network-chat', '', { text });
+  }, [localPeer.id, localPeer.username, peers, sendSignal, addLog]);
+
+  // Send a Batch of Files with Manifest Handshake & Backpressure Flow Control
+  const sendBatch = useCallback(async (targetPeerId: string, files: File[]): Promise<string> => {
+    if (!files || files.length === 0 || !targetPeerId) return '';
 
     const targetPeer = peers.get(targetPeerId);
     const isTargetHost = targetPeerId === hostId;
     const isSenderHost = localPeer.isHost;
-
-    // If transfer is between two non-host peers, use direct P2P bypass!
     const needsBypass = !isSenderHost && !isTargetHost;
 
-    addLog('transfer', `Initiating file transfer "${file.name}" to ${targetPeer?.username || targetPeerId} ${needsBypass ? '(Dynamically Bypassing Host)' : ''}`, targetPeerId);
-
-    // Get or create appropriate DataChannel
-    let dc: RTCDataChannel | undefined;
+    // Ensure connection is established
     if (needsBypass) {
-      if (!bypassDataChannels.current.has(targetPeerId)) {
-        createBypassConnection(targetPeerId, true);
-        // Wait briefly for channel opening
-        await new Promise(r => setTimeout(r, 600));
-      }
-      dc = bypassDataChannels.current.get(targetPeerId);
+      getOrCreateBypassConnection(targetPeerId, true);
     } else {
-      dc = dataChannels.current.get(targetPeerId);
+      getOrCreatePeerConnection(targetPeerId, true);
     }
 
-    if (!dc || dc.readyState !== 'open') {
-      addLog('error', `Cannot send file: DataChannel with ${targetPeerId} is not ready yet. Please retry in 1s.`, targetPeerId);
-      return;
-    }
-
-    const transferId = Math.random().toString(36).substring(2, 10).padEnd(36, ' ');
-
-    const newTransfer: NexusTransfer = {
-      id: transferId.trim(),
-      fileName: file.name,
-      fileSize: file.size,
-      progress: 0,
-      speed: 'Sending...',
-      fromPeerId: localPeer.id,
-      toPeerId: targetPeerId,
-      isBypass: needsBypass,
-      status: 'active',
-      transferredBytes: 0
-    };
-
-    setActiveTransfers(prev => new Map(prev).set(transferId.trim(), newTransfer));
-
-    // Send metadata header
-    dc.send(JSON.stringify({
-      type: 'file-meta',
-      transferId: transferId.trim(),
-      name: file.name,
-      size: file.size
-    }));
-
-    // Chunk reading & sending
-    const reader = file.stream().getReader();
-    let sentBytes = 0;
-    const idBuffer = new TextEncoder().encode(transferId); // 36 bytes fixed length
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        // Sub-chunk to CHUNK_SIZE
-        for (let i = 0; i < value.byteLength; i += CHUNK_SIZE) {
-          const slice = value.subarray(i, Math.min(i + CHUNK_SIZE, value.byteLength));
-          const packet = new Uint8Array(36 + slice.byteLength);
-          packet.set(idBuffer, 0);
-          packet.set(slice, 36);
-
-          // Backpressure check
-          if (dc.bufferedAmount > 4 * 1024 * 1024) {
-            await new Promise(r => setTimeout(r, 20));
-          }
-
-          dc.send(packet.buffer);
-          sentBytes += slice.byteLength;
-
-          const progress = Math.min(100, Math.round((sentBytes / file.size) * 100));
-          setActiveTransfers(prev => {
-            const next = new Map(prev);
-            const t = next.get(transferId.trim()) as NexusTransfer | undefined;
-            if (t) {
-              next.set(transferId.trim(), {
-                ...t,
-                progress,
-                transferredBytes: sentBytes,
-                speed: `${(sentBytes / (1024 * 1024)).toFixed(1)} MB`
-              });
-            }
-            return next;
-          });
-        }
+    // Await BatchTransferManager readiness
+    let manager = batchManagers.current.get(targetPeerId);
+    if (!manager) {
+      for (let i = 0; i < 12; i++) {
+        await new Promise(r => setTimeout(r, 250));
+        manager = batchManagers.current.get(targetPeerId);
+        if (manager) break;
       }
-
-      // Signal completion
-      dc.send(JSON.stringify({ type: 'transfer-complete', transferId: transferId.trim() }));
-      addLog('transfer', `File "${file.name}" transfer completed successfully!`, targetPeerId);
-
-      setActiveTransfers(prev => {
-        const next = new Map(prev);
-        const t = next.get(transferId.trim()) as NexusTransfer | undefined;
-        if (t) next.set(transferId.trim(), { ...t, progress: 100, status: 'completed' });
-        return next;
-      });
-
-      setTimeout(() => {
-        setActiveTransfers(prev => {
-          const next = new Map(prev);
-          next.delete(transferId.trim());
-          return next;
-        });
-      }, 4000);
-    } catch (err: any) {
-      addLog('error', `Transfer failed: ${err.message}`, targetPeerId);
-      setActiveTransfers(prev => {
-        const next = new Map(prev);
-        next.delete(transferId.trim());
-        return next;
-      });
     }
-  }, [addLog, createBypassConnection, hostId, localPeer.id, localPeer.isHost, peers]);
 
-  // Start Private Call with network-wide announcement
+    if (!manager) {
+      addLog('error', `Cannot transfer batch: Link to ${targetPeer?.username || targetPeerId} is still initializing. Please try again.`, targetPeerId);
+      return '';
+    }
+
+    return manager.enqueueBatch(files, targetPeerId, targetPeer?.username);
+  }, [addLog, getOrCreateBypassConnection, getOrCreatePeerConnection, hostId, localPeer.isHost, peers]);
+
+  // Single file transfer delegate
+  const sendFile = useCallback((targetPeerId: string, file: File) => {
+    return sendBatch(targetPeerId, [file]);
+  }, [sendBatch]);
+
+  // Cancel an active batch
+  const cancelBatch = useCallback((targetPeerId: string, batchId: string) => {
+    const manager = batchManagers.current.get(targetPeerId);
+    if (manager) {
+      manager.cancelBatch(batchId);
+    }
+  }, []);
+
+  // Start Private Call: Dynamically adds media tracks without interrupting active file transfers
   const startCall = useCallback(async (targetPeerId: string, callType: 'audio' | 'video' = 'audio') => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -729,7 +689,22 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
 
       setActiveCall(callObj);
 
-      // Broadcast to signaling server so everyone on network logs this private call
+      const isTargetHost = targetPeerId === hostId;
+      const isSenderHost = localPeer.isHost;
+      const needsBypass = !isSenderHost && !isTargetHost;
+
+      const pc = needsBypass
+        ? getOrCreateBypassConnection(targetPeerId, true)
+        : getOrCreatePeerConnection(targetPeerId, true);
+
+      // Dynamic Track Addition: onnegotiationneeded handles renegotiation smoothly
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream);
+      });
+
+      addLog('call', `Started dynamic ${callType} call with ${target?.username || targetPeerId} (multiplexed over existing link)`, targetPeerId);
+
+      // Broadcast to room
       sendSignal('private-call-start', targetPeerId, {
         callId,
         callerId: localPeer.id,
@@ -738,23 +713,72 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
         targetName: target?.username || targetPeerId,
         callType
       });
-
-      // Attach stream to peer connection
-      const pc = createPeerConnection(targetPeerId, true);
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
     } catch (err: any) {
-      addLog('error', `Could not access microphone/camera: ${err.message}`);
+      addLog('error', `Microphone/Camera access error: ${err.message}`);
     }
-  }, [addLog, createPeerConnection, localPeer.id, localPeer.username, peers, sendSignal]);
+  }, [addLog, getOrCreateBypassConnection, getOrCreatePeerConnection, hostId, localPeer.id, localPeer.isHost, localPeer.username, peers, sendSignal]);
 
-  // End Call
+  // Answer Incoming Private Call
+  const answerCall = useCallback(async (callType: 'audio' | 'video' = 'audio') => {
+    if (!activeCall) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: callType === 'video'
+      });
+      localStreamRef.current = stream;
+
+      setActiveCall(prev => prev ? { ...prev, stream } : null);
+
+      const targetPeerId = activeCall.callerId;
+      const isTargetHost = targetPeerId === hostId;
+      const isSenderHost = localPeer.isHost;
+      const needsBypass = !isSenderHost && !isTargetHost;
+
+      const pc = needsBypass
+        ? getOrCreateBypassConnection(targetPeerId, false)
+        : getOrCreatePeerConnection(targetPeerId, false);
+
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream);
+      });
+
+      addLog('call', `Answered ${callType} call from ${activeCall.callerName}. Media tracks multiplexed dynamically.`, targetPeerId);
+    } catch (err: any) {
+      addLog('error', `Microphone/Camera access error on answer: ${err.message}`);
+    }
+  }, [activeCall, addLog, getOrCreateBypassConnection, getOrCreatePeerConnection, hostId, localPeer.isHost]);
+
+  // End Call: Removes media tracks and triggers negotiation needed to cleanly teardown A/V
   const endCall = useCallback(() => {
     if (activeCall) {
-      sendSignal('private-call-end', activeCall.targetId, {
+      const targetPeerId = activeCall.isOutgoing ? activeCall.targetId : activeCall.callerId;
+      sendSignal('private-call-end', targetPeerId, {
         callId: activeCall.callId,
         callerName: activeCall.callerName,
         targetName: activeCall.targetName
       });
+
+      const isTargetHost = targetPeerId === hostId;
+      const isSenderHost = localPeer.isHost;
+      const needsBypass = !isSenderHost && !isTargetHost;
+
+      const pc = needsBypass
+        ? bypassConnections.current.get(targetPeerId)
+        : peerConnections.current.get(targetPeerId);
+
+      if (pc) {
+        pc.getSenders().forEach(sender => {
+          if (sender.track) {
+            try {
+              pc.removeTrack(sender);
+            } catch (e) {
+              console.error('Error removing track:', e);
+            }
+          }
+        });
+      }
     }
 
     if (localStreamRef.current) {
@@ -763,7 +787,32 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     }
 
     setActiveCall(null);
-  }, [activeCall, sendSignal]);
+  }, [activeCall, hostId, localPeer.isHost, sendSignal]);
+
+  // Derived Concurrent States for Visualization
+  const concurrentPeerStates = useMemo<ConcurrentBypassState[]>(() => {
+    return (Array.from(peers.values()) as NexusPeer[]).map(peer => {
+      const isCalling = Boolean(
+        activeCall &&
+        activeCall.active &&
+        (activeCall.targetId === peer.id || activeCall.callerId === peer.id)
+      );
+
+      const activeBatch = (Array.from(activeBatches.values()) as BatchTransferState[]).find(
+        b => b.targetId === peer.id && (b.status === 'streaming' || b.status === 'accepted' || b.status === 'negotiating')
+      );
+
+      return {
+        targetId: peer.id,
+        targetName: peer.username,
+        isCalling,
+        callType: isCalling ? activeCall?.callType : undefined,
+        hasActiveBatch: Boolean(activeBatch),
+        batchProgress: activeBatch?.progress,
+        isHostLink: peer.isHost || localPeer.isHost
+      };
+    });
+  }, [peers, activeCall, activeBatches, localPeer.isHost]);
 
   return {
     localPeer,
@@ -771,11 +820,16 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
     hostId,
     wsConnected,
     activeTransfers,
+    activeBatches,
+    concurrentPeerStates,
     logs,
     activeCall,
     sendFile,
+    sendBatch,
+    cancelBatch,
     sendMessage,
     startCall,
+    answerCall,
     endCall,
     addLog
   };

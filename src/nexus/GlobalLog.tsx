@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { NexusLog } from './types';
-import { Terminal, PhoneCall, ArrowUpRight, MessageSquare, Shield, Activity, Send, Trash2, Filter } from 'lucide-react';
+import { Terminal, PhoneCall, ArrowUpRight, MessageSquare, Shield, Activity, Send, Trash2, Package } from 'lucide-react';
 
 interface GlobalLogProps {
   logs: NexusLog[];
@@ -41,6 +41,14 @@ export const GlobalLog: React.FC<GlobalLogProps> = ({ logs, onSendMessage, onCle
           </span>
         );
       case 'transfer':
+        if (log.text.toLowerCase().includes('batch') || log.metadata?.batchId) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              <Package className="w-2.5 h-2.5" />
+              BATCH TRANSFER
+            </span>
+          );
+        }
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
             <ArrowUpRight className="w-2.5 h-2.5" />
@@ -80,7 +88,7 @@ export const GlobalLog: React.FC<GlobalLogProps> = ({ logs, onSendMessage, onCle
       <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <Terminal className="w-4 h-4 text-accent" />
-          <h3 className="text-xs font-semibold text-white tracking-wide">Global Event & Message Log</h3>
+          <h3 className="text-xs font-semibold text-white tracking-wide">Global Event & Multiplexed Log</h3>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-slate-300">
             {logs.length} events
           </span>
@@ -121,12 +129,16 @@ export const GlobalLog: React.FC<GlobalLogProps> = ({ logs, onSendMessage, onCle
         ) : (
           filteredLogs.map(log => {
             const isCall = log.type === 'call';
+            const isBatch = log.type === 'transfer' && (log.text.toLowerCase().includes('batch') || Boolean(log.metadata?.batchId));
+
             return (
               <div
                 key={log.id}
                 className={`p-2.5 rounded-xl border transition-all ${
                   isCall
                     ? 'bg-rose-500/10 border-rose-500/30 text-rose-200 shadow-md shadow-rose-950/20'
+                    : isBatch
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200 shadow-sm'
                     : 'bg-white/[0.03] border-white/5 text-slate-300 hover:bg-white/[0.06]'
                 }`}
               >
@@ -138,10 +150,10 @@ export const GlobalLog: React.FC<GlobalLogProps> = ({ logs, onSendMessage, onCle
                     )}
                   </div>
                   <span className="text-[10px] text-slate-500 whitespace-nowrap">
-                    {log.timestamp.toLocaleTimeString()}
+                    {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
                 </div>
-                <div className="text-[11px] leading-relaxed break-words font-sans">
+                <div className="text-slate-200 break-words leading-relaxed pl-0.5">
                   {log.text}
                 </div>
               </div>
@@ -151,26 +163,24 @@ export const GlobalLog: React.FC<GlobalLogProps> = ({ logs, onSendMessage, onCle
         <div ref={logEndRef} />
       </div>
 
-      {/* Network Broadcast Chat Form */}
-      {onSendMessage && (
-        <form onSubmit={handleSend} className="p-3 border-t border-white/10 bg-white/5 flex gap-2">
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            placeholder="Broadcast a message across Nexus network..."
-            className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-accent"
-          />
-          <button
-            type="submit"
-            disabled={!inputMessage.trim()}
-            className="px-3 py-2 bg-accent text-white rounded-xl text-xs font-semibold hover:bg-accent/90 disabled:opacity-40 transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>Send</span>
-          </button>
-        </form>
-      )}
+      {/* Message Input Footer (Multiplexed text channel) */}
+      <form onSubmit={handleSend} className="p-3 bg-white/5 border-t border-white/10 flex items-center gap-2">
+        <input
+          type="text"
+          value={inputMessage}
+          onChange={(e) => setInputMessage(e.target.value)}
+          placeholder="Send real-time chat (multiplexed on [nexus-chat])..."
+          className="flex-1 bg-black/50 border border-white/10 rounded-2xl px-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-accent font-sans transition-colors"
+        />
+        <button
+          type="submit"
+          disabled={!inputMessage.trim()}
+          className="p-2.5 rounded-2xl bg-accent hover:bg-accent/80 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shadow-md shadow-accent/20"
+          title="Send"
+        >
+          <Send className="w-4 h-4" />
+        </button>
+      </form>
     </div>
   );
 };
