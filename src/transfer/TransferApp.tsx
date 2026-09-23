@@ -731,7 +731,13 @@ export default function App() {
   }, [addLog]);
 
   const createPeer = useCallback((id: string) => {
-    const pc = new RTCPeerConnection({ iceServers: [] });
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+      ],
+      iceCandidatePoolSize: 0,
+    });
     peerConnections.current.set(id, pc);
     
     pc.oniceconnectionstatechange = () => {
@@ -748,18 +754,57 @@ export default function App() {
     return pc;
   }, [setupDataChannel]);
 
-  const waitForIce = (pc: RTCPeerConnection) => new Promise<void>((resolve) => {
-    if (pc.iceGatheringState === 'complete') resolve();
-    else {
-      const check = () => {
-        if (pc.iceGatheringState === 'complete') {
-          pc.removeEventListener('icegatheringstatechange', check);
-          resolve();
-        }
-      };
-      pc.addEventListener('icegatheringstatechange', check);
-      setTimeout(resolve, 3000);
+  const waitForIce = (pc: RTCPeerConnection, maxWaitMs = 600) => new Promise<void>((resolve) => {
+    if (pc.iceGatheringState === 'complete') {
+      resolve();
+      return;
     }
+
+    let isDone = false;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let hardCapTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      isDone = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (hardCapTimer) clearTimeout(hardCapTimer);
+      pc.removeEventListener('icegatheringstatechange', onStateChange);
+      pc.removeEventListener('icecandidate', onCandidate);
+    };
+
+    const finish = () => {
+      if (!isDone) {
+        cleanup();
+        resolve();
+      }
+    };
+
+    const onStateChange = () => {
+      if (pc.iceGatheringState === 'complete') {
+        finish();
+      }
+    };
+
+    const onCandidate = (event: RTCPeerConnectionIceEvent) => {
+      if (!event.candidate) {
+        finish();
+        return;
+      }
+      if (event.candidate.type === 'srflx') {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(finish, 80);
+        return;
+      }
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(finish, 200);
+    };
+
+    pc.addEventListener('icegatheringstatechange', onStateChange);
+    pc.addEventListener('icecandidate', onCandidate);
+
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    const ceiling = isOffline ? 250 : maxWaitMs;
+    hardCapTimer = setTimeout(finish, ceiling);
   });
 
   const createHostOffer = async () => {
@@ -777,7 +822,7 @@ export default function App() {
     await pc.setLocalDescription(offer);
     
     addLog("Generating matrix offer...", "info");
-    await waitForIce(pc);
+    await waitForIce(pc, 600);
     
     const sdp = JSON.stringify(pc.localDescription);
     const compressed = btoa(encodeURIComponent(sdp));
@@ -810,7 +855,7 @@ export default function App() {
       
       setStatus("handshaking");
       addLog("Offer synced, generating response matrix...", "info");
-      await waitForIce(pc);
+      await waitForIce(pc, 600);
       
       const answerSdp = JSON.stringify(pc.localDescription);
       const compressed = btoa(encodeURIComponent(answerSdp));
@@ -1220,17 +1265,7 @@ export default function App() {
               <section className="col-span-1 lg:col-span-4 flex flex-col gap-4 flex-shrink-0 lg:overflow-y-auto scrollbar-hide">
                 <div className="glass-panel p-5 flex-shrink-0">
                   <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
-                      <button
-                        onClick={() => setActiveTab("preview")}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30 transition-all cursor-pointer shadow-sm group hover:scale-[1.02] active:scale-[0.98]"
-                        title="Open in Preview Tab (Live P2P topology, file drop & encrypted call streams)"
-                      >
-                        <Network className="w-3.5 h-3.5 text-accent group-hover:scale-110 transition-transform" />
-                        <span>Nexus Network Map ➔</span>
-                      </button>
-                    </div>
+                    <h3 className="text-sm font-semibold text-text">Connection Matrix</h3>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button 
