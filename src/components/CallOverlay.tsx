@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { motion, AnimatePresence, useDragControls } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   PhoneOff, 
   Mic, 
@@ -132,7 +132,7 @@ export function CallOverlay({
   const [isVideoOff, setIsVideoOff] = useState(type === 'audio');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const dragControls = useDragControls();
+  const pipConstraintsRef = useRef<HTMLDivElement>(null);
 
   // Internal minimize fallback
   const [internalMinimized, setInternalMinimized] = useState(false);
@@ -392,59 +392,68 @@ export function CallOverlay({
           {/* Allows using Secure Chat and File Transfer simultaneously      */}
           {/* ------------------------------------------------------------- */}
           {minimized ? (
-            <motion.div
-              key="call-overlay-pip"
-              drag
-              dragControls={dragControls}
-              dragListener={false}
-              dragMomentum={false}
-              dragElastic={0.08}
-              initial={{ opacity: 0, scale: 0.85, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.85, y: 20 }}
-              transition={{ type: "spring", stiffness: 350, damping: 28 }}
-              className="fixed bottom-5 right-5 z-[95] w-72 sm:w-80 md:w-88 rounded-2xl shadow-[0_24px_50px_rgba(0,0,0,0.7)] border border-white/[0.12] bg-[#121418]/95 backdrop-blur-2xl overflow-hidden select-none text-white font-sans ring-1 ring-white/5 transition-shadow duration-200"
-            >
-              {/* Mini Header: Drag bar + Status + Maximize button */}
+            <>
+              {/* Viewport Drag Boundary */}
               <div 
-                onPointerDown={(e) => {
-                  if ((e.target as HTMLElement).closest('button')) return;
-                  dragControls.start(e);
+                ref={pipConstraintsRef} 
+                className="fixed inset-3 sm:inset-5 pointer-events-none z-[94]" 
+                aria-hidden="true" 
+              />
+
+              <motion.div
+                key="call-overlay-pip"
+                drag
+                dragConstraints={pipConstraintsRef}
+                dragElastic={0.08}
+                dragMomentum={false}
+                whileDrag={{ scale: 1.02, cursor: "grabbing" }}
+                initial={{ opacity: 0, scale: 0.85, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.85, y: 20 }}
+                transition={{
+                  opacity: { duration: 0.18 },
+                  scale: { type: "spring", stiffness: 380, damping: 28 },
+                  y: { type: "spring", stiffness: 380, damping: 28 }
                 }}
-                className="h-10 px-3 bg-[#181a20]/95 border-b border-white/[0.08] flex items-center justify-between flex-shrink-0 cursor-grab active:cursor-grabbing select-none"
+                className="fixed bottom-5 right-5 z-[95] w-72 sm:w-80 md:w-88 rounded-2xl shadow-[0_24px_50px_rgba(0,0,0,0.7)] border border-white/[0.12] bg-[#121418]/95 backdrop-blur-2xl overflow-hidden select-none text-white font-sans ring-1 ring-white/5 transition-shadow duration-200 touch-none cursor-grab active:cursor-grabbing"
               >
-                <div className="flex items-center gap-2 overflow-hidden pointer-events-none">
-                  <GripHorizontal className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
-                  <span className="relative flex h-2 w-2 flex-shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                  </span>
-                  <span className="text-xs font-semibold text-white/90 truncate">
-                    {pipPrimaryId === 'local' ? (isScreenSharing ? 'Your Screen' : 'You') : resolveParticipantName(pipPrimaryId)}
-                  </span>
-                  <span className="text-[10px] text-white/40 font-mono hidden sm:inline">
-                    {currentTime.toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })}
-                  </span>
+                {/* Mini Header: Drag bar + Status + Maximize button */}
+                <div 
+                  className="h-10 px-3 bg-[#181a20]/95 border-b border-white/[0.08] flex items-center justify-between flex-shrink-0 cursor-grab active:cursor-grabbing select-none"
+                  title="Drag to move PIP box"
+                >
+                  <div className="flex items-center gap-2 overflow-hidden pointer-events-none">
+                    <GripHorizontal className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
+                    <span className="relative flex h-2 w-2 flex-shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    </span>
+                    <span className="text-xs font-semibold text-white/90 truncate">
+                      {pipPrimaryId === 'local' ? (isScreenSharing ? 'Your Screen' : 'You') : resolveParticipantName(pipPrimaryId)}
+                    </span>
+                    <span className="text-[10px] text-white/40 font-mono hidden sm:inline">
+                      {currentTime.toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
+                    {/* Maximize Button */}
+                    <button
+                      onClick={toggleMinimize}
+                      className="p-1.5 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-colors cursor-pointer"
+                      title="Maximize meeting to full screen"
+                    >
+                      <Maximize2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
-                  {/* Maximize Button */}
-                  <button
-                    onClick={toggleMinimize}
-                    className="p-1.5 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-colors cursor-pointer"
-                    title="Maximize meeting to full screen"
-                  >
-                    <Maximize2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Mini Video Feed (Aspect-preserved with object-contain) */}
-              <div 
-                onClick={toggleMinimize}
-                className="w-full h-44 sm:h-48 bg-[#0b0c0f] relative overflow-hidden cursor-pointer group flex items-center justify-center"
-                title="Click to maximize meeting"
-              >
+                {/* Mini Video Feed (Aspect-preserved with object-contain) */}
+                <div 
+                  onClick={toggleMinimize}
+                  className="w-full h-44 sm:h-48 bg-[#0b0c0f] relative overflow-hidden cursor-grab active:cursor-grabbing group flex items-center justify-center"
+                  title="Click to maximize meeting, drag to move"
+                >
                 {pipPrimaryId === 'local' ? (
                   <LocalVideoTile 
                     stream={localStream}
@@ -539,6 +548,7 @@ export function CallOverlay({
                 </div>
               </div>
             </motion.div>
+          </>
           ) : (
             /* ------------------------------------------------------------- */
             /* FULL-SCREEN MEETING MODE                                      */
