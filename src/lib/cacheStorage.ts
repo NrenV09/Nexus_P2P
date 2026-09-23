@@ -106,7 +106,8 @@ export async function storeFileInSandboxCache(
   const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://app.local';
   const cacheUrl = `${origin}/sandbox-cache/${fileId}/${safeName}`;
 
-  if (typeof window !== 'undefined' && window.caches) {
+  // Store in CacheStorage if under 25MB to prevent quota exceptions
+  if (typeof window !== 'undefined' && window.caches && blobOrFile.size < 25 * 1024 * 1024) {
     try {
       const cache = await window.caches.open(CACHE_NAME);
       const headers = new Headers();
@@ -125,17 +126,12 @@ export async function storeFileInSandboxCache(
       const response = new Response(blobOrFile, { headers });
       await cache.put(cacheUrl, response);
     } catch (e) {
-      console.warn("storeFileInSandboxCache warning:", e);
+      console.warn("storeFileInSandboxCache quota notice:", e);
     }
   }
 
-  // Generate runtime Blob URL using the requested getOrStoreCache pattern
-  let blobUrl: string;
-  try {
-    blobUrl = await getOrStoreCache(cacheUrl, mimeType || blobOrFile.type || 'application/octet-stream');
-  } catch (_) {
-    blobUrl = URL.createObjectURL(blobOrFile);
-  }
+  // Generate runtime Blob URL directly from source to avoid double-allocation and 404 network fetches
+  const blobUrl = URL.createObjectURL(blobOrFile);
 
   return { cacheUrl, blobUrl };
 }

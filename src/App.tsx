@@ -67,7 +67,8 @@ import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { generateRandomName } from './lib/nameGenerator';
 import { createSafeDiskWriter, triggerBrowserFileDownload } from './lib/diskStreamer';
 
-const CHUNK_SIZE = 131072; // Max WebRTC chunk size (128KB)
+const CHUNK_SIZE = 64000; // WebRTC safe chunk size (strictly below 64KB SCTP limit for Firefox, Safari & iOS)
+const MAX_BUFFERED_AMOUNT = 512 * 1024; // 512KB safe flow control threshold to prevent SCTP buffer overflows
 
 export default function App() {
   // --- State ---
@@ -636,6 +637,8 @@ export default function App() {
 
       const dummyDc = {
          readyState: 'open',
+         bufferedAmount: 0,
+         bufferedAmountLowThreshold: 0,
          send: (data: any) => {
            console.log("[Simulation Send]:", data);
          },
@@ -1020,7 +1023,7 @@ export default function App() {
             }
           } else if (data.type === 'file-meta') {
             // Direct Downloads: Prompts receiver's browser immediately to download to disk (bypasses RAM & drop zone sandbox)
-            if (data.bypassRam || directDownloadsRef.current) {
+            if (data.bypassRam) {
               addLog(`Direct download requested for ${data.name}. Prompting browser to download...`, "info");
               setIncomingDirectPrompt({
                 peerId,
@@ -1029,7 +1032,7 @@ export default function App() {
               if (roleRef.current === 'host') {
                 dataChannels.current.forEach((dc, otherId) => {
                   if (otherId !== peerId && dc.readyState === 'open') {
-                    dc.send(event.data);
+                    try { dc.send(event.data); } catch (_) {}
                   }
                 });
               }
@@ -1298,14 +1301,18 @@ export default function App() {
           if (roleRef.current === 'host') {
             dataChannels.current.forEach((dc, otherId) => {
               if (otherId !== peerId && dc.readyState === 'open') {
-                dc.send(event.data);
+                try {
+                  dc.send(event.data);
+                } catch (_) {}
               }
             });
           }
 
-          if (!buffer.isDirectDisk && !buffer.writable && buffer.receivedSize >= buffer.metadata.size) {
+          if (!buffer.isDirectDisk && !buffer.writable && buffer.receivedSize >= buffer.metadata.size && !buffer.isFinished) {
+            buffer.isFinished = true;
             triggerTransferAnimation();
             const blob = new Blob(buffer.chunks, { type: buffer.metadata.mimeType });
+            buffer.chunks = [];
             finishFileReceive(buffer, blob);
           }
         }
@@ -2172,61 +2179,91 @@ export default function App() {
 
     let offset = 0;
     cancelTransferRef.current = false;
-    const reader = new FileReader();
-    
-    const readSlice = () => {
-      const slice = file.slice(offset, offset + CHUNK_SIZE);
-      reader.readAsArrayBuffer(slice);
-    };
 
-    reader.onload = (e) => {
-      if (!e.target?.result) return;
-      const data = e.target.result as ArrayBuffer;
-      
-      if (file.size > 5 * 1024 * 1024 * 1024) {
-        addLog(`File exceeds 5GB limit: ${file.name}`, "err");
-        return;
-      }
-      
-      if (cancelTransferRef.current) return;
-      
-      dataChannels.current.forEach(dc => {
-        if (dc.readyState === 'open') dc.send(data);
-      });
+    const startStreaming = () => {
+      const sendNextChunk = async () => {
+        if (cancelTransferRef.current) {
+          addLog(`Transfer aborted for ${file.name}`, "info");
+          setTransfer(null);
+          return;
+        }
 
-      offset += data.byteLength;
-      
-      const now = Date.now();
-      if (now - lastUpdateRef.current > 150 || offset >= file.size) {
-        const progress = Math.round((offset / file.size) * 100);
-        setTransfer(prev => prev ? { ...prev, progress, transferredBytes: offset } : null);
-        lastUpdateRef.current = now;
-      }
+        if (offset >= file.size) {
+          triggerTransferAnimation();
+          addLog(`Sent payload: ${file.name}${isDirect ? ' (Streamed directly to receiver disk)' : ''}`, "ok");
+          setTimeout(() => setTransfer(null), 1000);
+          return;
+        }
 
-      if (offset < file.size) {
-        // High throughput flow control
-        const checkBuffer = () => {
-          let maxBuffer = 0;
-          dataChannels.current.forEach(dc => maxBuffer = Math.max(maxBuffer, dc.bufferedAmount));
-          if (maxBuffer > 4 * 1024 * 1024) {
-            setTimeout(checkBuffer, 50);
-          } else {
-            readSlice();
+        // Flow control: Inspect RTCDataChannel buffer status
+        let maxBuffer = 0;
+        dataChannels.current.forEach(dc => {
+          if (dc.readyState === 'open' && typeof dc.bufferedAmount === 'number') {
+            maxBuffer = Math.max(maxBuffer, dc.bufferedAmount);
           }
-        };
-        checkBuffer();
-      } else {
-        triggerTransferAnimation();
-        addLog(`Sent payload: ${file.name}${isDirect ? ' (Streamed directly to receiver disk)' : ''}`, "ok");
-        setTimeout(() => setTransfer(null), 1000);
-      }
+        });
+
+        if (maxBuffer > MAX_BUFFERED_AMOUNT) {
+          // SCTP buffer backpressure: pause and wait for buffer to drain
+          setTimeout(sendNextChunk, 25);
+          return;
+        }
+
+        const nextChunkEnd = Math.min(offset + CHUNK_SIZE, file.size);
+        const slice = file.slice(offset, nextChunkEnd);
+
+        try {
+          const chunkData = await slice.arrayBuffer();
+          if (cancelTransferRef.current) return;
+
+          let anySent = false;
+          dataChannels.current.forEach(dc => {
+            if (dc.readyState === 'open') {
+              try {
+                dc.send(chunkData);
+                anySent = true;
+              } catch (sendErr) {
+                console.warn("RTCDataChannel send chunk error:", sendErr);
+              }
+            }
+          });
+
+          if (anySent || isSimulation) {
+            offset += chunkData.byteLength;
+            const now = Date.now();
+            if (now - lastUpdateRef.current > 150 || offset >= file.size) {
+              const progress = Math.round((offset / file.size) * 100);
+              setTransfer(prev => prev ? { ...prev, progress, transferredBytes: offset } : null);
+              lastUpdateRef.current = now;
+            }
+          }
+
+          if (offset < file.size) {
+            // High throughput dispatch with event loop yielding
+            if (maxBuffer > MAX_BUFFERED_AMOUNT / 2) {
+              setTimeout(sendNextChunk, 10);
+            } else {
+              setTimeout(sendNextChunk, 0);
+            }
+          } else {
+            triggerTransferAnimation();
+            addLog(`Sent payload: ${file.name}${isDirect ? ' (Streamed directly to receiver disk)' : ''}`, "ok");
+            setTimeout(() => setTransfer(null), 1000);
+          }
+        } catch (sliceErr: any) {
+          addLog(`File read error during transfer of ${file.name}: ${sliceErr?.message || sliceErr}`, "err");
+          setTransfer(null);
+        }
+      };
+
+      sendNextChunk();
     };
 
     if (isDirect) {
       pendingDirectSendRef.current = {
         file,
         startSend: () => {
-          readSlice();
+          startStreaming();
         }
       };
 
@@ -2252,8 +2289,31 @@ export default function App() {
         totalBytes: file.size,
         isWaitingForReceiver: false
       });
-      readSlice();
+      startStreaming();
     }
+  };
+
+  const fileQueueRef = useRef<File[]>([]);
+  const isProcessingQueueRef = useRef(false);
+
+  const processFileQueue = async () => {
+    if (isProcessingQueueRef.current || fileQueueRef.current.length === 0) return;
+    isProcessingQueueRef.current = true;
+    try {
+      while (fileQueueRef.current.length > 0) {
+        const nextFile = fileQueueRef.current.shift();
+        if (nextFile) {
+          await sendFile(nextFile);
+        }
+      }
+    } finally {
+      isProcessingQueueRef.current = false;
+    }
+  };
+
+  const handleFilesSelected = (files: File[]) => {
+    fileQueueRef.current.push(...files);
+    processFileQueue();
   };
 
   return (
@@ -2850,7 +2910,7 @@ export default function App() {
                       <div 
                         onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true); }}
                         onDragLeave={() => setIsDraggingOver(false)}
-                        onDrop={(e) => { e.preventDefault(); setIsDraggingOver(false); if (e.dataTransfer.files) Array.from(e.dataTransfer.files).forEach(sendFile); }}
+                        onDrop={(e) => { e.preventDefault(); setIsDraggingOver(false); if (e.dataTransfer.files) handleFilesSelected(Array.from(e.dataTransfer.files)); }}
                         className={cn(
                           "relative border-2 border-dashed rounded-3xl h-36 flex flex-col items-center justify-center transition-colors cursor-pointer mb-5 overflow-hidden group",
                           isDraggingOver ? "border-accent bg-accent/5 text-accent" : "border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/30 dark:bg-transparent text-muted hover:border-accent hover:bg-white/50 dark:hover:bg-black/5 "
@@ -2862,7 +2922,7 @@ export default function App() {
                           multiple 
                           className="absolute inset-0 opacity-0 cursor-pointer z-10"
                           disabled={status !== 'connected'}
-                          onChange={(e) => { if (e.target.files) Array.from(e.target.files).forEach(sendFile); }}
+                          onChange={(e) => { if (e.target.files) handleFilesSelected(Array.from(e.target.files)); }}
                         />
                         <div className="text-3xl mb-2 transition-transform group-hover:-translate-y-1">
                           <Send className="w-8 h-8 opacity-80" />
@@ -2870,7 +2930,7 @@ export default function App() {
                         <div className="text-sm font-semibold mb-1">
                           {isDraggingOver ? "Drop to Send" : "Click or Drag Files Here"}
                         </div>
-                        <div className="text-xs opacity-70">Up to 5GB per file transfer</div>
+                        <div className="text-xs opacity-70">Direct high-speed P2P stream</div>
                       </div>
 
                       <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-hide">

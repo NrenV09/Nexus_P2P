@@ -289,26 +289,21 @@ export async function createSafeDiskWriter(
     }
   }
 
-  // 4. Memory Fallback with strict iOS WebKit Jetsam Guard
+  // 4. Memory Fallback
   const chunks: ArrayBuffer[] = [];
   let receivedBytes = 0;
-  // Maximum safe buffer size for iOS WebKit without triggering Jetsam white screen
-  const MAX_SAFE_IOS_BYTES = 250 * 1024 * 1024; // 250 MB
 
   const memWriter: DiskWriter = {
     mode: 'memory',
     isWriting: false,
     async write(chunk: ArrayBuffer) {
       receivedBytes += chunk.byteLength;
-      if (isIOS && receivedBytes > MAX_SAFE_IOS_BYTES) {
-        throw new Error(
-          `iOS Memory Limit Reached: Transfer paused at ${Math.round(receivedBytes / (1024 * 1024))}MB to prevent an iOS WebKit white-screen crash. Use Chromium Desktop for multi-gigabyte transfers.`
-        );
-      }
       chunks.push(chunk);
     },
     async close() {
-      return new Blob(chunks, { type: mimeType || 'application/octet-stream' });
+      const blob = new Blob(chunks, { type: mimeType || 'application/octet-stream' });
+      chunks.length = 0;
+      return blob;
     },
     async abort() {
       chunks.length = 0;
@@ -318,9 +313,7 @@ export async function createSafeDiskWriter(
   return {
     writer: memWriter,
     mode: 'memory',
-    warning: isIOS && totalSize > MAX_SAFE_IOS_BYTES
-      ? `Large file alert: This file (${Math.round(totalSize / (1024 * 1024))}MB) is close to mobile iOS RAM limits.`
-      : undefined
+    warning: undefined
   };
 }
 
