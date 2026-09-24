@@ -731,13 +731,7 @@ export default function App() {
   }, [addLog]);
 
   const createPeer = useCallback((id: string) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' },
-      ],
-      iceCandidatePoolSize: 0,
-    });
+    const pc = new RTCPeerConnection({ iceServers: [] });
     peerConnections.current.set(id, pc);
     
     pc.oniceconnectionstatechange = () => {
@@ -754,57 +748,18 @@ export default function App() {
     return pc;
   }, [setupDataChannel]);
 
-  const waitForIce = (pc: RTCPeerConnection, maxWaitMs = 600) => new Promise<void>((resolve) => {
-    if (pc.iceGatheringState === 'complete') {
-      resolve();
-      return;
+  const waitForIce = (pc: RTCPeerConnection) => new Promise<void>((resolve) => {
+    if (pc.iceGatheringState === 'complete') resolve();
+    else {
+      const check = () => {
+        if (pc.iceGatheringState === 'complete') {
+          pc.removeEventListener('icegatheringstatechange', check);
+          resolve();
+        }
+      };
+      pc.addEventListener('icegatheringstatechange', check);
+      setTimeout(resolve, 3000);
     }
-
-    let isDone = false;
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    let hardCapTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const cleanup = () => {
-      isDone = true;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      if (hardCapTimer) clearTimeout(hardCapTimer);
-      pc.removeEventListener('icegatheringstatechange', onStateChange);
-      pc.removeEventListener('icecandidate', onCandidate);
-    };
-
-    const finish = () => {
-      if (!isDone) {
-        cleanup();
-        resolve();
-      }
-    };
-
-    const onStateChange = () => {
-      if (pc.iceGatheringState === 'complete') {
-        finish();
-      }
-    };
-
-    const onCandidate = (event: RTCPeerConnectionIceEvent) => {
-      if (!event.candidate) {
-        finish();
-        return;
-      }
-      if (event.candidate.type === 'srflx') {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(finish, 80);
-        return;
-      }
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(finish, 200);
-    };
-
-    pc.addEventListener('icegatheringstatechange', onStateChange);
-    pc.addEventListener('icecandidate', onCandidate);
-
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-    const ceiling = isOffline ? 250 : maxWaitMs;
-    hardCapTimer = setTimeout(finish, ceiling);
   });
 
   const createHostOffer = async () => {
@@ -822,7 +777,7 @@ export default function App() {
     await pc.setLocalDescription(offer);
     
     addLog("Generating matrix offer...", "info");
-    await waitForIce(pc, 600);
+    await waitForIce(pc);
     
     const sdp = JSON.stringify(pc.localDescription);
     const compressed = btoa(encodeURIComponent(sdp));
@@ -855,7 +810,7 @@ export default function App() {
       
       setStatus("handshaking");
       addLog("Offer synced, generating response matrix...", "info");
-      await waitForIce(pc, 600);
+      await waitForIce(pc);
       
       const answerSdp = JSON.stringify(pc.localDescription);
       const compressed = btoa(encodeURIComponent(answerSdp));

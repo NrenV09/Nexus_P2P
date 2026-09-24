@@ -114,7 +114,6 @@ export default function App() {
   const [role, setRole] = useState<NodeRole>(null);
   const [status, setStatus] = useState<ConnectionStatus>("offline");
   const [isTransferring, setIsTransferring] = useState(false);
-  const [isGeneratingOffer, setIsGeneratingOffer] = useState(false);
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
@@ -1366,7 +1365,7 @@ export default function App() {
                 await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
-                await waitForIce(pc, 150);
+                await waitForIce(pc);
                 const dc = dataChannels.current.get(peerId);
                 if (dc && dc.readyState === 'open') {
                   dc.send(JSON.stringify({ type: 'media-answer', sdp: pc.localDescription }));
@@ -1594,9 +1593,10 @@ export default function App() {
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
       ],
-      iceCandidatePoolSize: 0,
+      iceCandidatePoolSize: 2,
     });
     peerConnections.current.set(id, pc);
     
@@ -1654,94 +1654,47 @@ export default function App() {
     return pc;
   }, [setupDataChannel, addLog]);
 
-  const waitForIce = (pc: RTCPeerConnection, maxWaitMs = 600) => new Promise<void>((resolve) => {
+  const waitForIce = (pc: RTCPeerConnection) => new Promise<void>((resolve) => {
     if (pc.iceGatheringState === 'complete') {
       resolve();
       return;
     }
-
-    let isDone = false;
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    let hardCapTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const cleanup = () => {
-      isDone = true;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      if (hardCapTimer) clearTimeout(hardCapTimer);
-      pc.removeEventListener('icegatheringstatechange', onStateChange);
-      pc.removeEventListener('icecandidate', onCandidate);
-    };
-
-    const finish = () => {
-      if (!isDone) {
-        cleanup();
+    const check = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', check);
         resolve();
       }
     };
-
-    const onStateChange = () => {
-      if (pc.iceGatheringState === 'complete') {
-        finish();
-      }
-    };
-
-    const onCandidate = (event: RTCPeerConnectionIceEvent) => {
-      // When candidate is null, browser ICE gathering is officially complete
-      if (!event.candidate) {
-        finish();
-        return;
-      }
-
-      // If a reflexive candidate arrived (STUN public address discovered),
-      // we already have the NAT traversal candidate. A brief 80ms debounce captures any remaining pair.
-      if (event.candidate.type === 'srflx') {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(finish, 80);
-        return;
-      }
-
-      // For host candidates, wait up to 200ms for STUN candidate. If none arrives (offline / restricted network), resolve.
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(finish, 200);
-    };
-
-    pc.addEventListener('icegatheringstatechange', onStateChange);
-    pc.addEventListener('icecandidate', onCandidate);
-
-    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-    const ceiling = isOffline ? 250 : maxWaitMs;
-    hardCapTimer = setTimeout(finish, ceiling);
+    pc.addEventListener('icegatheringstatechange', check);
+    // When offline or on local LAN airgap, host candidates gather in <600ms; resolve promptly without blocking on unreachable STUN servers
+    const timeout = typeof navigator !== 'undefined' && !navigator.onLine ? 800 : 2500;
+    setTimeout(() => {
+      pc.removeEventListener('icegatheringstatechange', check);
+      resolve();
+    }, timeout);
   });
 
   const createHostOffer = async () => {
-    setIsGeneratingOffer(true);
-    try {
-      const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
-      setQrPayload("");
-      setPasteBuffer("");
-      
-      const pc = createPeer(id);
-      const dc = pc.createDataChannel('nexus-transfer');
-      setupDataChannel(dc, id);
-      
-      if (connectedCount === 0) setStatus("handshaking");
-      
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      
-      addLog("Generating matrix offer...", "info");
-      await waitForIce(pc, 600);
-      
-      const sdp = JSON.stringify(pc.localDescription);
-      const compressed = btoa(encodeURIComponent(sdp));
-      setQrPayload(compressed);
-      addLog("Offer ready. Peer sync required.", "ok");
-    } catch (err) {
-      addLog("Failed to generate offer matrix", "err");
-      console.error(err);
-    } finally {
-      setIsGeneratingOffer(false);
-    }
+    const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
+    setQrPayload("");
+    setPasteBuffer("");
+    
+    const pc = createPeer(id);
+    const dc = pc.createDataChannel('nexus-transfer');
+    setupDataChannel(dc, id);
+    
+    if (connectedCount === 0) setStatus("handshaking");
+    
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    
+    addLog("Generating matrix offer...", "info");
+    await waitForIce(pc);
+    
+    const sdp = JSON.stringify(pc.localDescription);
+    const compressed = btoa(encodeURIComponent(sdp));
+    setQrPayload(compressed);
+    addLog("Offer ready. Peer sync required.", "ok");
   };
 
   const decodeSDP = (input: string) => {
@@ -1769,7 +1722,7 @@ export default function App() {
       
       setStatus("handshaking");
       addLog("Offer synced, generating response matrix...", "info");
-      await waitForIce(pc, 600);
+      await waitForIce(pc);
       
       const answerSdp = JSON.stringify(pc.localDescription);
       const compressed = btoa(encodeURIComponent(answerSdp));
@@ -1980,7 +1933,7 @@ export default function App() {
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        await waitForIce(pc, 150);
+        await waitForIce(pc);
         const dc = dataChannels.current.get(peerId);
         if (dc && dc.readyState === 'open') {
           dc.send(JSON.stringify({
@@ -2045,7 +1998,7 @@ export default function App() {
         });
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        await waitForIce(pc, 150);
+        await waitForIce(pc);
         const dc = dataChannels.current.get(incoming.peerId);
         if (dc && dc.readyState === 'open') {
           dc.send(JSON.stringify({
@@ -2265,7 +2218,7 @@ export default function App() {
         }
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        await waitForIce(pc, 150);
+        await waitForIce(pc);
         const dc = dataChannels.current.get(peerId);
         if (dc && dc.readyState === 'open') {
           dc.send(JSON.stringify({ type: 'media-offer', sdp: pc.localDescription }));
@@ -2776,7 +2729,7 @@ export default function App() {
               setInfoModalTab('guide');
               setShowInfoModal(true);
             }}
-            className="w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 flex items-center justify-center text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 transition-all border border-sky-500/40 dark:border-sky-400/30 bg-sky-50 dark:bg-sky-400/10 hover:bg-sky-100 dark:hover:bg-sky-400/20 backdrop-blur rounded-xl lg:rounded-2xl shadow-sm hover:scale-105 cursor-pointer flex-shrink-0"
+            className="w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 flex items-center justify-center text-sky-500 dark:text-sky-400 hover:text-sky-600 dark:hover:text-sky-300 transition-all border border-sky-500/30 dark:border-sky-400/30 bg-sky-500/10 dark:bg-sky-400/10 hover:bg-sky-500/20 dark:hover:bg-sky-400/20 backdrop-blur rounded-xl lg:rounded-2xl shadow-sm hover:scale-105 cursor-pointer flex-shrink-0"
             title="App Manual, Connection Guide & Legal / Privacy Hub (Info)"
             aria-label="App Manual, Connection Guide and Legal & Privacy Hub"
           >
@@ -3032,11 +2985,9 @@ export default function App() {
                                 <div className="flex gap-2 mt-4 w-full object-contain max-w-[250px]">
                                   <button 
                                     onClick={createHostOffer}
-                                    disabled={isGeneratingOffer}
-                                    className="flex-1 py-2 bg-white dark:bg-transparent hover:bg-gray-50 border border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent rounded-xl text-accent text-sm font-semibold transition-colors shadow-sm disabled:opacity-60 flex items-center justify-center gap-1.5 cursor-pointer"
+                                    className="flex-1 py-2 bg-white dark:bg-transparent hover:bg-gray-50 border border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent rounded-xl text-accent text-sm font-semibold transition-colors shadow-sm"
                                   >
-                                    {isGeneratingOffer ? <RefreshCw className="w-4 h-4 animate-spin text-accent" /> : null}
-                                    <span>{isGeneratingOffer ? "Generating..." : "Regenerate Offer"}</span>
+                                    Regenerate Offer
                                   </button>
                                   <button 
                                     onClick={() => {
@@ -3060,20 +3011,10 @@ export default function App() {
                             ) : (
                               <button 
                                 onClick={createHostOffer}
-                                disabled={isGeneratingOffer}
-                                className="w-full py-4 mt-2 border border-dashed border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/30 dark:bg-transparent rounded-xl hover:bg-white/50 dark:hover:bg-black/5 transition-all text-text font-medium flex-row flex items-center justify-center gap-3 shadow-sm disabled:opacity-60 cursor-pointer"
+                                className="w-full py-4 mt-2 border border-dashed border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/30 dark:bg-transparent rounded-xl hover:bg-white/50 dark:hover:bg-black/5 transition-all text-text font-medium flex-row flex items-center justify-center gap-3 shadow-sm"
                               >
-                                {isGeneratingOffer ? (
-                                  <>
-                                    <span>Generating Offer Matrix...</span>
-                                    <RefreshCw className="w-5 h-5 text-accent animate-spin" />
-                                  </>
-                                ) : (
-                                  <>
-                                    {connectedCount > 0 ? "Add Another Peer (Generate QR)" : "Init Offer Matrix"}
-                                    {connectedCount > 0 ? <UserPlus className="w-5 h-5 text-accent" /> : <RefreshCw className="w-5 h-5 text-muted" />}
-                                  </>
-                                )}
+                                {connectedCount > 0 ? "Add Another Peer (Generate QR)" : "Init Offer Matrix"}
+                                {connectedCount > 0 ? <UserPlus className="w-5 h-5 text-accent" /> : <RefreshCw className="w-5 h-5 text-muted" />}
                               </button>
                             )}
                           </div>
