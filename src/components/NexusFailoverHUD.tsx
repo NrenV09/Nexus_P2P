@@ -26,9 +26,10 @@ import { NexusNetworkNode } from '../lib/NexusNetworkNode';
 interface NexusFailoverHUDProps {
   localUsername: string;
   localAvatarColor: string;
+  localAvatarImage?: string;
   localPeerId: string;
   realConnectedCount?: number;
-  peerProfiles?: Record<string, { id: string; username: string; avatarColor: string; bio?: string; joinedAt?: string }>;
+  peerProfiles?: Record<string, { id: string; username: string; avatarColor: string; avatarImage?: string; bio?: string; joinedAt?: string }>;
   role?: 'host' | 'join' | null;
   networkStatus?: 'offline' | 'disconnected' | 'handshaking' | 'connected';
   activeNode?: NexusNetworkNode | null;
@@ -44,6 +45,7 @@ interface NexusFailoverHUDProps {
 export function NexusFailoverHUD({
   localUsername,
   localAvatarColor,
+  localAvatarImage,
   localPeerId,
   realConnectedCount = 0,
   peerProfiles = {},
@@ -147,6 +149,7 @@ export function NexusFailoverHUD({
       role: isHost ? 'host' : 'peer',
       username: myName,
       avatarColor: myColor,
+      avatarImage: localAvatarImage,
       lastHeartbeat: Date.now(),
       latencyMs: 1,
       missedHeartbeats: 0,
@@ -179,6 +182,7 @@ export function NexusFailoverHUD({
         role: isRemoteHost ? 'host' : 'peer',
         username: p.username || `Peer-${id.substring(0, 4)}`,
         avatarColor: p.avatarColor || 'bg-blue-500',
+        avatarImage: p.avatarImage,
         lastHeartbeat: Date.now(),
         latencyMs: 8 + (idx * 3),
         missedHeartbeats: 0,
@@ -645,8 +649,12 @@ export function NexusFailoverHUD({
                       )}>
                         #{peer.joinOrder}
                       </span>
-                      <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm flex-shrink-0", peer.avatarColor)}>
-                        {peer.username.charAt(0).toUpperCase()}
+                      <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm flex-shrink-0 overflow-hidden", peer.avatarColor)}>
+                        {peer.avatarImage ? (
+                          <img src={peer.avatarImage} alt={peer.username} className="w-full h-full object-cover" />
+                        ) : (
+                          peer.username.charAt(0).toUpperCase()
+                        )}
                       </div>
                       <div className="min-w-0">
                         <div className="font-semibold text-text truncate flex items-center gap-1.5 text-xs">
@@ -786,8 +794,12 @@ export function NexusFailoverHUD({
                       {/* Identity */}
                       <td className="py-2.5 sm:py-3 px-2 sm:px-3">
                         <div className="flex items-center gap-2 sm:gap-2.5">
-                          <div className={cn("w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center text-white text-[10px] sm:text-xs font-bold shadow-sm flex-shrink-0", peer.avatarColor)}>
-                            {peer.username.charAt(0).toUpperCase()}
+                          <div className={cn("w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center text-white text-[10px] sm:text-xs font-bold shadow-sm flex-shrink-0 overflow-hidden", peer.avatarColor)}>
+                            {peer.avatarImage ? (
+                              <img src={peer.avatarImage} alt={peer.username} className="w-full h-full object-cover" />
+                            ) : (
+                              peer.username.charAt(0).toUpperCase()
+                            )}
                           </div>
                           <div className="min-w-0">
                             <div className="font-semibold text-text truncate flex items-center gap-1.5 text-xs sm:text-sm">

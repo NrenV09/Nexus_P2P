@@ -100,6 +100,7 @@ export function CallOverlay({
   type,
   localStream,
   remoteStreams,
+  localProfile,
   peerProfiles,
   peerTrackStates,
   screenSharingPeers,
@@ -115,6 +116,7 @@ export function CallOverlay({
   type: 'audio' | 'video' | null;
   localStream: MediaStream | null;
   remoteStreams: Record<string, MediaStream>;
+  localProfile?: UserProfile;
   peerProfiles?: Record<string, UserProfile>;
   peerTrackStates?: Record<string, { video?: boolean; audio?: boolean }>;
   screenSharingPeers?: Record<string, boolean>;
@@ -365,6 +367,20 @@ export function CallOverlay({
     return getPeerName?.(id) || peerProfiles?.[id]?.username || 'Remote Node';
   };
 
+  const resolveParticipantAvatar = (id: string): string | undefined => {
+    if (id === 'local') return localProfile?.avatarImage;
+    if (peerProfiles?.[id]?.avatarImage) return peerProfiles[id].avatarImage;
+    const matched = Object.values(peerProfiles || {}).find(p => p.id === id);
+    return matched?.avatarImage;
+  };
+
+  const resolveParticipantColor = (id: string): string | undefined => {
+    if (id === 'local') return localProfile?.avatarColor;
+    if (peerProfiles?.[id]?.avatarColor) return peerProfiles[id].avatarColor;
+    const matched = Object.values(peerProfiles || {}).find(p => p.id === id);
+    return matched?.avatarColor;
+  };
+
   // Find primary participant to display when minimized in Picture-in-Picture
   const pipPrimaryId = useMemo(() => {
     if (effectiveSpotlightId) return effectiveSpotlightId;
@@ -462,6 +478,8 @@ export function CallOverlay({
                     isScreenSharing={isScreenSharing}
                     isLocalSpeaking={isLocalSpeaking}
                     isMicMuted={isMicMuted}
+                    avatarImage={resolveParticipantAvatar('local')}
+                    avatarColor={resolveParticipantColor('local')}
                     fitMode="contain"
                     isThumbnail={true}
                   />
@@ -471,6 +489,8 @@ export function CallOverlay({
                       id={pipPrimaryId}
                       name={resolveParticipantName(pipPrimaryId)}
                       stream={remoteStreams[pipPrimaryId]}
+                      avatarImage={resolveParticipantAvatar(pipPrimaryId)}
+                      avatarColor={resolveParticipantColor(pipPrimaryId)}
                       isRemoteVideoOff={peerTrackStates?.[pipPrimaryId]?.video === false || (type === 'audio' && peerTrackStates?.[pipPrimaryId]?.video !== true)}
                       isRemoteAudioMuted={peerTrackStates?.[pipPrimaryId]?.audio === false}
                       fitMode="contain"
@@ -665,6 +685,8 @@ export function CallOverlay({
                             isScreenSharing={isScreenSharing}
                             isLocalSpeaking={isLocalSpeaking}
                             isMicMuted={isMicMuted}
+                            avatarImage={resolveParticipantAvatar('local')}
+                            avatarColor={resolveParticipantColor('local')}
                             fitMode={tileFitModes['local'] || 'contain'}
                             isSpotlightStage={true}
                             onToggleFit={() => toggleTileFit('local')}
@@ -676,6 +698,8 @@ export function CallOverlay({
                               id={effectiveSpotlightId}
                               name={resolveParticipantName(effectiveSpotlightId)}
                               stream={remoteStreams[effectiveSpotlightId]}
+                              avatarImage={resolveParticipantAvatar(effectiveSpotlightId)}
+                              avatarColor={resolveParticipantColor(effectiveSpotlightId)}
                               isRemoteVideoOff={peerTrackStates?.[effectiveSpotlightId]?.video === false || (type === 'audio' && peerTrackStates?.[effectiveSpotlightId]?.video !== true)}
                               isRemoteAudioMuted={peerTrackStates?.[effectiveSpotlightId]?.audio === false}
                               isScreenSharing={!!screenSharingPeers?.[effectiveSpotlightId]}
@@ -704,6 +728,8 @@ export function CallOverlay({
                               isScreenSharing={isScreenSharing}
                               isLocalSpeaking={isLocalSpeaking}
                               isMicMuted={isMicMuted}
+                              avatarImage={resolveParticipantAvatar('local')}
+                              avatarColor={resolveParticipantColor('local')}
                               fitMode={tileFitModes['local'] || 'contain'}
                               isThumbnail={true}
                             />
@@ -735,6 +761,8 @@ export function CallOverlay({
                                 id={id}
                                 name={resolvedName}
                                 stream={stream}
+                                avatarImage={resolveParticipantAvatar(id)}
+                                avatarColor={resolveParticipantColor(id)}
                                 isRemoteVideoOff={trackState?.video === false || (type === 'audio' && trackState?.video !== true)}
                                 isRemoteAudioMuted={trackState?.audio === false}
                                 isScreenSharing={!!screenSharingPeers?.[id]}
@@ -775,6 +803,8 @@ export function CallOverlay({
                           isScreenSharing={isScreenSharing}
                           isLocalSpeaking={isLocalSpeaking}
                           isMicMuted={isMicMuted}
+                          avatarImage={resolveParticipantAvatar('local')}
+                          avatarColor={resolveParticipantColor('local')}
                           fitMode={tileFitModes['local'] || (isScreenSharing ? 'contain' : 'contain')}
                           onToggleFit={() => toggleTileFit('local')}
                           onSpotlight={() => handleSpotlight('local')}
@@ -794,6 +824,8 @@ export function CallOverlay({
                               id={id}
                               name={resolvedName}
                               stream={stream}
+                              avatarImage={resolveParticipantAvatar(id)}
+                              avatarColor={resolveParticipantColor(id)}
                               isRemoteVideoOff={trackState?.video === false || (type === 'audio' && trackState?.video !== true)}
                               isRemoteAudioMuted={trackState?.audio === false}
                               isScreenSharing={!!screenSharingPeers?.[id]}
@@ -954,6 +986,8 @@ interface LocalVideoTileProps {
   isScreenSharing: boolean;
   isLocalSpeaking: boolean;
   isMicMuted: boolean;
+  avatarImage?: string;
+  avatarColor?: string;
   fitMode?: 'contain' | 'cover';
   isSpotlightStage?: boolean;
   isThumbnail?: boolean;
@@ -969,6 +1003,8 @@ function LocalVideoTile({
   isScreenSharing,
   isLocalSpeaking,
   isMicMuted,
+  avatarImage,
+  avatarColor,
   fitMode = 'contain',
   isSpotlightStage = false,
   isThumbnail = false,
@@ -1055,13 +1091,18 @@ function LocalVideoTile({
       {!showVideo && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-[#181a22] to-[#0f1116]">
           <div className={cn(
-            "rounded-full bg-blue-600/20 border flex items-center justify-center text-blue-200 font-bold uppercase shadow-2xl transition-all",
+            "rounded-full border flex items-center justify-center text-blue-200 font-bold uppercase shadow-2xl transition-all overflow-hidden",
+            avatarColor || "bg-blue-600/20",
             isThumbnail ? "w-12 h-12 text-sm" : "w-22 h-22 sm:w-26 sm:h-26 text-2xl sm:text-3xl",
             isLocalSpeaking 
               ? "border-emerald-400 ring-4 ring-emerald-500/30 scale-105 shadow-[0_0_25px_rgba(16,185,129,0.35)]" 
               : "border-blue-500/30 shadow-inner"
           )}>
-            You
+            {avatarImage ? (
+              <img src={avatarImage} alt="You" className="w-full h-full object-cover" />
+            ) : (
+              "You"
+            )}
           </div>
           {!isThumbnail && isVideoOff && !hasActiveScreenTrack && (
             <span className="text-xs text-zinc-400 mt-3 font-medium bg-black/40 px-3 py-1 rounded-full border border-white/5">
@@ -1137,6 +1178,11 @@ function LocalVideoTile({
         "absolute bottom-2.5 left-2.5 flex items-center gap-2 bg-black/60 backdrop-blur-xl border border-white/10 rounded-xl text-xs font-medium text-white shadow-lg z-10",
         isThumbnail ? "px-2 py-0.5 text-[10px]" : "px-3 py-1.5"
       )}>
+        {avatarImage && (
+          <div className="w-4 h-4 rounded-full overflow-hidden border border-white/30 flex-shrink-0">
+            <img src={avatarImage} alt="You" className="w-full h-full object-cover" />
+          </div>
+        )}
         {isMicMuted ? (
           <MicOff className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
         ) : isLocalSpeaking ? (
@@ -1168,6 +1214,8 @@ function RemoteVideoTile({
   stream, 
   id, 
   name,
+  avatarImage,
+  avatarColor,
   isRemoteVideoOff,
   isRemoteAudioMuted,
   isScreenSharing = false,
@@ -1181,6 +1229,8 @@ function RemoteVideoTile({
   stream: MediaStream; 
   id: string; 
   name: string; 
+  avatarImage?: string;
+  avatarColor?: string;
   isRemoteVideoOff?: boolean;
   isRemoteAudioMuted?: boolean;
   isScreenSharing?: boolean;
@@ -1273,13 +1323,18 @@ function RemoteVideoTile({
       {!showVideo && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-[#181a22] to-[#0f1116]">
           <div className={cn(
-            "rounded-full bg-emerald-600/20 border flex items-center justify-center text-emerald-200 font-bold uppercase shadow-2xl transition-all",
+            "rounded-full border flex items-center justify-center text-emerald-200 font-bold uppercase shadow-2xl transition-all overflow-hidden",
+            avatarColor || "bg-emerald-600/20",
             isThumbnail ? "w-12 h-12 text-sm" : "w-22 h-22 sm:w-26 sm:h-26 text-2xl sm:text-3xl",
             isRemoteSpeaking 
               ? "border-emerald-400 ring-4 ring-emerald-500/30 scale-105 shadow-[0_0_25px_rgba(16,185,129,0.35)]" 
               : "border-emerald-500/30 shadow-inner"
           )}>
-            {initials}
+            {avatarImage ? (
+              <img src={avatarImage} alt={name} className="w-full h-full object-cover" />
+            ) : (
+              initials
+            )}
           </div>
           {!isThumbnail && isRemoteVideoOff && (
             <p className="text-xs text-zinc-400 mt-3 font-medium bg-black/40 px-3 py-1 rounded-full border border-white/5">
@@ -1340,6 +1395,11 @@ function RemoteVideoTile({
         "absolute bottom-2.5 left-2.5 flex items-center gap-2 bg-black/60 backdrop-blur-xl border border-white/10 rounded-xl text-xs font-medium text-white shadow-lg z-10",
         isThumbnail ? "px-2 py-0.5 text-[10px]" : "px-3 py-1.5"
       )}>
+        {avatarImage && (
+          <div className="w-4 h-4 rounded-full overflow-hidden border border-white/30 flex-shrink-0">
+            <img src={avatarImage} alt={name} className="w-full h-full object-cover" />
+          </div>
+        )}
         {isRemoteAudioMuted ? (
           <MicOff className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
         ) : isRemoteSpeaking ? (

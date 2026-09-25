@@ -63,6 +63,7 @@ export interface MapNode {
   isHost: boolean;
   isSelf: boolean;
   avatarColor: string;
+  avatarImage?: string;
   deviceType: 'host' | 'peer';
   x: number; // percentage (0 - 100)
   y: number; // percentage (0 - 100)
@@ -187,6 +188,7 @@ export function NexusNetworkMap({
         isHost: isLocalHost,
         isSelf: true,
         avatarColor: localProfile.avatarColor || 'bg-accent',
+        avatarImage: localProfile.avatarImage,
         deviceType: isLocalHost ? 'host' : 'peer',
         x: 50,
         y: 50,
@@ -207,6 +209,7 @@ export function NexusNetworkMap({
         isHost: true,
         isSelf: true,
         avatarColor: localProfile.avatarColor || 'bg-accent',
+        avatarImage: localProfile.avatarImage,
         deviceType: 'host',
         x: 50,
         y: 50,
@@ -230,7 +233,8 @@ export function NexusNetworkMap({
       const peersToRender = realPeers.length > 0 ? realPeers : Array.from({ length: connectedCount }).map((_, i) => ({
         id: `peer-${i + 1}`,
         username: `Peer ${i + 1}`,
-        avatarColor: ['bg-emerald-600', 'bg-blue-600', 'bg-purple-600', 'bg-amber-600'][i % 4]
+        avatarColor: ['bg-emerald-600', 'bg-blue-600', 'bg-purple-600', 'bg-amber-600'][i % 4],
+        avatarImage: undefined
       }));
 
       peersToRender.forEach((p, idx) => {
@@ -242,6 +246,7 @@ export function NexusNetworkMap({
           isHost: false,
           isSelf: false,
           avatarColor: p.avatarColor || 'bg-blue-600',
+          avatarImage: p.avatarImage,
           deviceType: 'peer',
           x: pos.x,
           y: pos.y,
@@ -251,7 +256,7 @@ export function NexusNetworkMap({
       });
     } else {
       // Local user is a peer. The Host is at center, local user and other peers are around it
-      const hostPeer = realPeers[0] || { id: 'host-anchor', username: 'Host Node', avatarColor: 'bg-accent' };
+      const hostPeer = realPeers[0] || { id: 'host-anchor', username: 'Host Node', avatarColor: 'bg-accent', avatarImage: undefined };
       list.push({
         id: hostPeer.id,
         name: hostPeer.username || 'Host Node',
@@ -259,6 +264,7 @@ export function NexusNetworkMap({
         isHost: true,
         isSelf: false,
         avatarColor: hostPeer.avatarColor || 'bg-accent',
+        avatarImage: hostPeer.avatarImage,
         deviceType: 'host',
         x: 50,
         y: 50,
@@ -282,6 +288,7 @@ export function NexusNetworkMap({
         isHost: false,
         isSelf: true,
         avatarColor: localProfile.avatarColor || 'bg-blue-600',
+        avatarImage: localProfile.avatarImage,
         deviceType: 'peer',
         x: radialPositions[0].x,
         y: radialPositions[0].y,
@@ -299,6 +306,7 @@ export function NexusNetworkMap({
           isHost: false,
           isSelf: false,
           avatarColor: p.avatarColor || 'bg-emerald-600',
+          avatarImage: p.avatarImage,
           deviceType: 'peer',
           x: pos.x,
           y: pos.y,
@@ -698,7 +706,7 @@ export function NexusNetworkMap({
 
               {/* Node Avatar Circle */}
               <div className={cn(
-                "relative rounded-full flex items-center justify-center text-white font-bold transition-all duration-300 shadow-xl border-2",
+                "relative rounded-full flex items-center justify-center text-white font-bold transition-all duration-300 shadow-xl border-2 overflow-hidden",
                 node.isHost ? "w-16 h-16 md:w-20 md:h-20" : "w-14 h-14 md:w-16 md:h-16",
                 node.avatarColor || "bg-accent",
                 isDragTarget 
@@ -708,15 +716,19 @@ export function NexusNetworkMap({
                     : "border-white/80 group-hover:scale-110 group-hover:border-accent",
                 node.isHost && "ring-2 ring-accent/60 ring-offset-2 ring-offset-slate-950"
               )}>
-                {/* Node icon / initial */}
-                <div className="flex flex-col items-center justify-center leading-tight">
-                  {node.isHost ? (
-                    <Crown className="w-5 h-5 md:w-6 md:h-6 text-yellow-300 drop-shadow-md mb-0.5" />
-                  ) : null}
-                  <span className="text-xs md:text-sm font-bold tracking-wider uppercase">
-                    {node.name.charAt(0)}
-                  </span>
-                </div>
+                {node.avatarImage ? (
+                  <img src={node.avatarImage} alt={node.name} className="w-full h-full object-cover" />
+                ) : (
+                  /* Node icon / initial */
+                  <div className="flex flex-col items-center justify-center leading-tight">
+                    {node.isHost ? (
+                      <Crown className="w-5 h-5 md:w-6 md:h-6 text-yellow-300 drop-shadow-md mb-0.5" />
+                    ) : null}
+                    <span className="text-xs md:text-sm font-bold tracking-wider uppercase">
+                      {node.name.charAt(0)}
+                    </span>
+                  </div>
+                )}
 
                 {/* Drop cue overlay */}
                 {isDragTarget && (
@@ -747,8 +759,12 @@ export function NexusNetworkMap({
           <div className="absolute z-30 bottom-4 right-4 max-w-sm w-80 bg-slate-900/95 border border-white/15 rounded-3xl p-4 shadow-2xl backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <div className="flex items-center gap-2.5">
-                <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold", selectedNode.avatarColor)}>
-                  {selectedNode.isHost ? "👑" : selectedNode.name.charAt(0)}
+                <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold overflow-hidden shadow-xs", selectedNode.avatarColor)}>
+                  {selectedNode.avatarImage ? (
+                    <img src={selectedNode.avatarImage} alt={selectedNode.name} className="w-full h-full object-cover" />
+                  ) : (
+                    selectedNode.isHost ? "👑" : selectedNode.name.charAt(0)
+                  )}
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
@@ -919,8 +935,12 @@ export function NexusNetworkMap({
               {nodes.map(n => (
                 <div key={n.id} className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className={cn("w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white", n.avatarColor)}>
-                      {n.isHost ? "👑" : n.name.charAt(0)}
+                    <div className={cn("w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white overflow-hidden shadow-xs", n.avatarColor)}>
+                      {n.avatarImage ? (
+                        <img src={n.avatarImage} alt={n.name} className="w-full h-full object-cover" />
+                      ) : (
+                        n.isHost ? "👑" : n.name.charAt(0)
+                      )}
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs font-bold truncate text-white">{n.name}</div>

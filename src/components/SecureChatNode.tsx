@@ -434,12 +434,19 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
                   <div 
                     className={cn(
                       "text-[9px] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5",
-                      "text-white/80",
+                      "text-white/90",
                       msg.sender !== "me" && msg.senderId && "cursor-pointer hover:opacity-80 transition-opacity"
                     )}
                     onClick={() => msg.sender !== "me" && msg.senderId && onClickProfile?.(msg.senderId)}
                   >
-                    {msg.senderName || (msg.sender === "me" ? "LOCAL" : "PEER")} • {msg.timestamp.toLocaleTimeString([], { hour12: false })}
+                    {msg.senderAvatar ? (
+                      <div className="w-4 h-4 rounded-full overflow-hidden border border-white/40 flex-shrink-0 shadow-xs">
+                        <img src={msg.senderAvatar} alt={msg.senderName || 'Avatar'} className="w-full h-full object-cover" />
+                      </div>
+                    ) : null}
+                    <span>{msg.senderName || (msg.sender === "me" ? "LOCAL" : "PEER")}</span>
+                    <span className="opacity-70">•</span>
+                    <span className="opacity-70">{msg.timestamp.toLocaleTimeString([], { hour12: false })}</span>
                   </div>
                 )}
 

@@ -49,13 +49,28 @@ export function ViewProfileModal({ profile, onClose, onStartCall }: ViewProfileM
           {/* Avatar Display */}
           <div className="flex flex-col items-center gap-4">
             <div className={cn(
-              "w-28 h-28 rounded-full flex items-center justify-center text-white text-5xl font-bold shadow-xl border-4 border-white dark:border-zinc-800",
+              "w-28 h-28 rounded-full flex items-center justify-center text-white text-5xl font-bold shadow-xl border-4 border-white dark:border-zinc-800 overflow-hidden relative",
               profile.avatarColor || "bg-accent"
             )}>
-              {profile.username.charAt(0).toUpperCase() || '?'}
+              {profile.avatarImage ? (
+                <img 
+                  src={profile.avatarImage} 
+                  alt={profile.username} 
+                  className="w-full h-full object-cover" 
+                />
+              ) : (
+                profile.username.charAt(0).toUpperCase() || '?'
+              )}
             </div>
             <div className="text-center space-y-1">
-              <h3 className="text-2xl font-bold text-text">{profile.username}</h3>
+              <h3 className="text-2xl font-bold text-text flex items-center justify-center gap-2">
+                {profile.username}
+                {profile.avatarImage && (
+                  <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                    Custom Avatar
+                  </span>
+                )}
+              </h3>
               <p className="text-xs font-mono text-muted mb-1">NODE_ID: {profile.id}</p>
               <div className="flex items-center gap-1.5 text-xs text-muted justify-center bg-zinc-100 dark:bg-zinc-800/50 px-3 py-1.5 rounded-full">
                 <Calendar className="w-3.5 h-3.5" />

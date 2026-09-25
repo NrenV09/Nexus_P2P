@@ -7,6 +7,7 @@ export interface ChatMessage {
   sender: 'me' | 'them' | 'system';
   senderName?: string;
   senderColor?: string;
+  senderAvatar?: string;
   senderId?: string;
   audioData?: string;
   timestamp: Date;
@@ -48,6 +49,7 @@ export interface UserProfile {
   id: string;
   username: string;
   avatarColor: string;
+  avatarImage?: string; // Base64 data URL for profile picture
   bio: string;
   joinedAt: string;
 }

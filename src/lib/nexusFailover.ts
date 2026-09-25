@@ -21,6 +21,7 @@ export interface NexusPeer {
   role: 'host' | 'peer';
   username: string;
   avatarColor: string;
+  avatarImage?: string;
   lastHeartbeat: number;        // Timestamp of last received heartbeat pong/ping
   latencyMs: number;
   missedHeartbeats: number;

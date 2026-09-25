@@ -395,6 +395,9 @@ export default function App() {
       dataChannels.current.set(peerId, channel);
       setConnectedPeers(dataChannels.current.size);
       setStatus("connected");
+      // Clear one-time handshake QR code and buffer upon successful connection
+      setQrPayload("");
+      setPasteBuffer("");
       channel.send(JSON.stringify({ 
         type: 'identity', 
         profile: profile
@@ -831,13 +834,24 @@ export default function App() {
   };
 
   const decodeSDP = (input: string) => {
+    if (!input) throw new Error("Empty protocol string");
+    const clean = input.trim();
+    if (clean.startsWith('{') && clean.endsWith('}')) {
+      return clean;
+    }
     try {
-      const decoded = atob(input);
-      if (decoded.trim().startsWith('{')) return decoded;
+      const decompressed = decodeURIComponent(atob(clean));
+      if (decompressed && decompressed.trim().startsWith('{')) return decompressed.trim();
     } catch {}
     try {
-      const decompressed = decodeURIComponent(atob(input));
-      if (decompressed && decompressed.trim().startsWith('{')) return decompressed;
+      const decoded = atob(clean);
+      if (decoded && decoded.trim().startsWith('{')) return decoded.trim();
+    } catch {}
+    try {
+      const unescaped = decodeURIComponent(clean);
+      if (unescaped.startsWith('{') && unescaped.endsWith('}')) return unescaped.trim();
+      const decoded = atob(unescaped);
+      if (decoded && decoded.trim().startsWith('{')) return decoded.trim();
     } catch {}
     throw new Error("Invalid or corrupt protocol string format");
   };
@@ -845,11 +859,22 @@ export default function App() {
   const handleReceivedOffer = async (input: string) => {
     if (!input) return;
     try {
-      const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
       const sdpString = decodeSDP(input);
+      const parsedSdp = JSON.parse(sdpString);
+
+      if (!parsedSdp || typeof parsedSdp !== 'object') {
+        throw new Error("Malformed protocol descriptor object");
+      }
+
+      if (parsedSdp.type !== 'offer') {
+        addLog(`Invalid offer: Received descriptor of type "${parsedSdp.type}". Scan a Host Offer QR code.`, "err");
+        return;
+      }
+
+      const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
       const pc = createPeer(id);
       
-      await pc.setRemoteDescription(JSON.parse(sdpString));
+      await pc.setRemoteDescription(parsedSdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       
@@ -857,12 +882,16 @@ export default function App() {
       addLog("Offer synced, generating response matrix...", "info");
       await waitForIce(pc, 600);
       
+      if (!pc.localDescription) {
+        throw new Error("Failed to produce answer local description");
+      }
+
       const answerSdp = JSON.stringify(pc.localDescription);
       const compressed = btoa(encodeURIComponent(answerSdp));
       setQrPayload(compressed);
       addLog("Response generated. Finalize handshake at host.", "ok");
-    } catch (e) {
-      addLog("Corrupt offer payload", "err");
+    } catch (e: any) {
+      addLog(`Corrupt or invalid offer payload: ${e?.message || e}`, "err");
     }
   };
 
@@ -872,14 +901,25 @@ export default function App() {
     
     try {
       const sdpString = decodeSDP(sdp);
-      await localConnectionRef.current.setRemoteDescription(JSON.parse(sdpString));
+      const parsedSdp = JSON.parse(sdpString);
+
+      if (!parsedSdp || typeof parsedSdp !== 'object') {
+        throw new Error("Malformed protocol descriptor object");
+      }
+
+      if (parsedSdp.type !== 'answer') {
+        addLog(`Invalid answer: Received descriptor of type "${parsedSdp.type}". Scan a Joiner Answer QR code.`, "err");
+        return;
+      }
+
+      await localConnectionRef.current.setRemoteDescription(parsedSdp);
       addLog("Synchronizing ICE protocols...", "info");
       setTimeout(() => {
         setQrPayload("");
         setPasteBuffer("");
       }, 500);
-    } catch (e) {
-      addLog("Corrupt answer payload", "err");
+    } catch (e: any) {
+      addLog(`Corrupt or invalid answer payload: ${e?.message || e}`, "err");
     }
   };
 

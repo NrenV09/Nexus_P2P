@@ -124,7 +124,7 @@ export default function App() {
   const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
   const ringtoneCtxRef = useRef<AudioContext | null>(null);
   const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const endCallRef = useRef<() => void>(() => {});
+  const endCallRef = useRef<(notifyPeers?: boolean) => void>(() => {});
 
   const playRingChime = useCallback(() => {
     try {
@@ -284,6 +284,7 @@ export default function App() {
   const [connectedCount, setConnectedPeers] = useState(0);
   const fileBuffers = useRef<Map<string, any>>(new Map());
   const lastUpdateRef = useRef<number>(Date.now());
+  const createHostOfferRef = useRef<(() => Promise<void>) | null>(null);
 
   const transferRef = useRef<TransferProgress | null>(null);
   useEffect(() => {
@@ -589,6 +590,8 @@ export default function App() {
     // Step down to join role and become 1st heir
     setRole('join');
     roleRef.current = 'join';
+    setQrPayload("");
+    setPasteBuffer("");
     setShowFailoverMenu(false);
     addLog(`👑 Host authority transferred to ${targetName}. You are now designated 1st Heir.`, "ok");
     setMessages(prev => [...prev, {
@@ -624,6 +627,8 @@ export default function App() {
 
     setRole('join');
     roleRef.current = 'join';
+    setQrPayload("");
+    setPasteBuffer("");
     setShowFailoverMenu(false);
     addLog(`🛡️ Graceful Host Drop: Stepped down and gave host authority to 1st joiner (${targetName}).`, "ok");
     setMessages(prev => [...prev, {
@@ -906,6 +911,9 @@ export default function App() {
       dataChannels.current.set(peerId, channel);
       setConnectedPeers(dataChannels.current.size);
       setStatus("connected");
+      // Clear one-time handshake QR code and buffer upon successful connection
+      setQrPayload("");
+      setPasteBuffer("");
       channel.send(JSON.stringify({ 
         type: 'identity', 
         profile: profile
@@ -963,7 +971,7 @@ export default function App() {
         setStatus("offline");
         // Automatically turn off call when all live peers disconnect
         if (isCallActiveRef.current || localStreamRef.current) {
-          endCallRef.current?.();
+          endCallRef.current?.(false);
           addLog("Call automatically ended: All peers disconnected", "info");
         }
       }
@@ -994,6 +1002,8 @@ export default function App() {
         addLog("⚠️ Nexus Failover: Host node disappeared abruptly. Activating automated heir succession...", "info");
         setRole('host');
         roleRef.current = 'host';
+        setQrPayload("");
+        setPasteBuffer("");
         addLog("👑 Nexus Failover: You are designated 1st Heir and have assumed Host authority!", "ok");
         setMessages(msgs => [...msgs, {
           id: Date.now().toString(),
@@ -1001,6 +1011,9 @@ export default function App() {
           sender: 'system',
           timestamp: new Date()
         }]);
+        setTimeout(() => {
+          createHostOfferRef.current?.();
+        }, 150);
       }
     };
 
@@ -1110,6 +1123,9 @@ export default function App() {
             if (data.newHostId === profile.id) {
               setRole('host');
               roleRef.current = 'host';
+              // Immediately clear old joiner answer QR payload so it's never displayed as an invalid host offer
+              setQrPayload("");
+              setPasteBuffer("");
               addLog(`👑 Host Authority Transferred: You are now the Authoritative Host!`, "ok");
               setMessages(prev => [...prev, {
                 id: Date.now().toString(),
@@ -1117,6 +1133,10 @@ export default function App() {
                 sender: 'system',
                 timestamp: new Date()
               }]);
+              // Automatically generate fresh, valid Host Offer QR code for new joiners
+              setTimeout(() => {
+                createHostOfferRef.current?.();
+              }, 150);
             } else {
               addLog(`👑 Host authority transferred to ${data.newHostName}`, "info");
               setMessages(prev => [...prev, {
@@ -1129,6 +1149,16 @@ export default function App() {
           } else if (data.type === 'profile-update') {
             const updatedProfile = data.profile;
             setPeerProfiles(prev => ({ ...prev, [updatedProfile.id]: updatedProfile }));
+            try {
+              const list = JSON.parse(localStorage.getItem('quantum_saved_peers') || '[]');
+              const existingIdx = list.findIndex((p: any) => p.id === updatedProfile.id);
+              if (existingIdx !== -1) {
+                list[existingIdx] = updatedProfile;
+              } else {
+                list.push(updatedProfile);
+              }
+              localStorage.setItem('quantum_saved_peers', JSON.stringify(list));
+            } catch(e) {}
             if (roleRef.current === 'host') {
               dataChannels.current.forEach((dc, otherId) => {
                 if (otherId !== peerId && dc.readyState === 'open') {
@@ -1144,6 +1174,7 @@ export default function App() {
               sender: 'them',
               senderName: data.senderName,
               senderColor: data.senderColor,
+              senderAvatar: data.senderAvatar || (data.senderId ? peerProfiles[data.senderId]?.avatarImage : undefined),
               senderId: data.senderId,
               timestamp: data.timestamp ? new Date(data.timestamp) : new Date()
             }]);
@@ -1189,12 +1220,13 @@ export default function App() {
                   sender: 'them',
                   senderName: fullData.senderName,
                   senderColor: fullData.senderColor,
+                  senderAvatar: fullData.senderAvatar || (fullData.senderId ? peerProfiles[fullData.senderId]?.avatarImage : undefined),
                   senderId: fullData.senderId,
                   timestamp: fullData.timestamp ? new Date(fullData.timestamp) : new Date()
                 }]);
                 setUnreadChatCount(prev => activeTabRef.current !== 'chat' ? prev + 1 : 0);
               } catch (e) {
-                console.error("Failed to parse reassembled chat chunk:", e);
+                console.error("Failed to parse reconstructed chat JSON", e);
               }
             }
           } else if (data.type === 'file-meta') {
@@ -1288,7 +1320,9 @@ export default function App() {
             addLog(data.isScreenMirror ? `Incoming screen broadcast from ${data.callerName || 'peer'}` : `Incoming ${data.callType} call from ${data.callerName || 'peer'}`, "info");
             setIncomingCall({
               peerId,
-              callerName: data.callerName || 'Peer',
+              callerName: data.callerName || peerProfiles[peerId]?.username || 'Peer',
+              callerAvatar: data.callerAvatar || peerProfiles[peerId]?.avatarImage,
+              callerColor: data.callerColor || peerProfiles[peerId]?.avatarColor,
               callType: data.callType || 'video',
               isScreenMirror: data.isScreenMirror,
               sdp: data.sdp
@@ -1307,14 +1341,24 @@ export default function App() {
           } else if (data.type === 'call-decline') {
             addLog(`Call declined by ${data.by || 'peer'}`, "err");
             const pc = peerConnections.current.get(peerId);
-            if (pc && pc.signalingState !== 'stable') {
-              try {
-                await pc.setLocalDescription({ type: 'rollback' });
-              } catch (e) {
-                console.warn("Rollback on call-decline:", e);
+            if (pc) {
+              if (data.sdp) {
+                try {
+                  await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                } catch (e) {
+                  console.warn("Setting decline remote answer failed:", e);
+                }
+              }
+              if (pc.signalingState === 'have-local-offer' && pc.localDescription?.sdp) {
+                try {
+                  const rejectSdp = createRejectAnswerSdp(pc.localDescription.sdp);
+                  await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: rejectSdp }));
+                } catch (e) {
+                  console.warn("Fallback reject answer on decline failed:", e);
+                }
               }
             }
-            endCallRef.current?.();
+            endCallRef.current?.(false);
           } else if (data.type === 'screen-share-state') {
             setCallType('video');
             if (data.sharing) {
@@ -1344,7 +1388,7 @@ export default function App() {
             }));
           } else if (data.type === 'call-end') {
             addLog("Call ended by peer", "info");
-            endCallRef.current?.();
+            endCallRef.current?.(false);
           } else if (data.type === 'ice-candidate') {
             const pc = peerConnections.current.get(peerId);
             if (pc && data.candidate) {
@@ -1607,7 +1651,7 @@ export default function App() {
           handleTransferFailure("WebRTC peer connection lost", id, transferRef.current.name, false);
         }
         if (dataChannels.current.size === 0 && (isCallActiveRef.current || localStreamRef.current)) {
-          endCallRef.current?.();
+          endCallRef.current?.(false);
           addLog("Call automatically ended: Peer connection lost", "info");
         }
       }
@@ -1674,7 +1718,7 @@ export default function App() {
     }, timeout);
   });
 
-  const createHostOffer = async () => {
+  const createHostOffer = useCallback(async () => {
     const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
     setQrPayload("");
     setPasteBuffer("");
@@ -1685,26 +1729,50 @@ export default function App() {
     
     if (connectedCount === 0) setStatus("handshaking");
     
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    
-    addLog("Generating matrix offer...", "info");
-    await waitForIce(pc);
-    
-    const sdp = JSON.stringify(pc.localDescription);
-    const compressed = btoa(encodeURIComponent(sdp));
-    setQrPayload(compressed);
-    addLog("Offer ready. Peer sync required.", "ok");
-  };
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      addLog("Generating matrix offer...", "info");
+      await waitForIce(pc);
+      
+      if (!pc.localDescription) {
+        addLog("Failed to gather ICE candidates for offer", "err");
+        return;
+      }
+      
+      const sdp = JSON.stringify(pc.localDescription);
+      const compressed = btoa(encodeURIComponent(sdp));
+      setQrPayload(compressed);
+      addLog("Offer ready. Peer sync required.", "ok");
+    } catch (err: any) {
+      addLog(`Failed to create host offer: ${err?.message || err}`, "err");
+    }
+  }, [createPeer, setupDataChannel, connectedCount, addLog]);
+
+  useEffect(() => {
+    createHostOfferRef.current = createHostOffer;
+  }, [createHostOffer]);
 
   const decodeSDP = (input: string) => {
+    if (!input) throw new Error("Empty protocol string");
+    const clean = input.trim();
+    if (clean.startsWith('{') && clean.endsWith('}')) {
+      return clean;
+    }
     try {
-      const decoded = atob(input);
-      if (decoded.trim().startsWith('{')) return decoded;
+      const decompressed = decodeURIComponent(atob(clean));
+      if (decompressed && decompressed.trim().startsWith('{')) return decompressed.trim();
     } catch {}
     try {
-      const decompressed = decodeURIComponent(atob(input));
-      if (decompressed && decompressed.trim().startsWith('{')) return decompressed;
+      const decoded = atob(clean);
+      if (decoded && decoded.trim().startsWith('{')) return decoded.trim();
+    } catch {}
+    try {
+      const unescaped = decodeURIComponent(clean);
+      if (unescaped.startsWith('{') && unescaped.endsWith('}')) return unescaped.trim();
+      const decoded = atob(unescaped);
+      if (decoded && decoded.trim().startsWith('{')) return decoded.trim();
     } catch {}
     throw new Error("Invalid or corrupt protocol string format");
   };
@@ -1712,11 +1780,22 @@ export default function App() {
   const handleReceivedOffer = async (input: string) => {
     if (!input) return;
     try {
-      const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
       const sdpString = decodeSDP(input);
+      const parsedSdp = JSON.parse(sdpString);
+
+      if (!parsedSdp || typeof parsedSdp !== 'object') {
+        throw new Error("Malformed protocol descriptor object");
+      }
+
+      if (parsedSdp.type !== 'offer') {
+        addLog(`Invalid offer: Received descriptor of type "${parsedSdp.type}". Scan a Host Offer QR code.`, "err");
+        return;
+      }
+
+      const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
       const pc = createPeer(id);
       
-      await pc.setRemoteDescription(JSON.parse(sdpString));
+      await pc.setRemoteDescription(parsedSdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       
@@ -1724,12 +1803,16 @@ export default function App() {
       addLog("Offer synced, generating response matrix...", "info");
       await waitForIce(pc);
       
+      if (!pc.localDescription) {
+        throw new Error("Failed to produce answer local description");
+      }
+
       const answerSdp = JSON.stringify(pc.localDescription);
       const compressed = btoa(encodeURIComponent(answerSdp));
       setQrPayload(compressed);
       addLog("Response generated. Finalize handshake at host.", "ok");
-    } catch (e) {
-      addLog("Corrupt offer payload", "err");
+    } catch (e: any) {
+      addLog(`Corrupt or invalid offer payload: ${e?.message || e}`, "err");
     }
   };
 
@@ -1739,14 +1822,25 @@ export default function App() {
     
     try {
       const sdpString = decodeSDP(sdp);
-      await localConnectionRef.current.setRemoteDescription(JSON.parse(sdpString));
+      const parsedSdp = JSON.parse(sdpString);
+
+      if (!parsedSdp || typeof parsedSdp !== 'object') {
+        throw new Error("Malformed protocol descriptor object");
+      }
+
+      if (parsedSdp.type !== 'answer') {
+        addLog(`Invalid answer: Received descriptor of type "${parsedSdp.type}". Scan a Joiner Answer QR code.`, "err");
+        return;
+      }
+
+      await localConnectionRef.current.setRemoteDescription(parsedSdp);
       addLog("Synchronizing ICE protocols...", "info");
       setTimeout(() => {
         setQrPayload("");
         setPasteBuffer("");
       }, 500);
-    } catch (e) {
-      addLog("Corrupt answer payload", "err");
+    } catch (e: any) {
+      addLog(`Corrupt or invalid answer payload: ${e?.message || e}`, "err");
     }
   };
 
@@ -1840,6 +1934,35 @@ export default function App() {
     return s;
   };
 
+  const createRejectAnswerSdp = (offerSdp: string): string => {
+    const lines = offerSdp.split(/\r?\n/);
+    const result: string[] = [];
+    let inMedia = false;
+    for (const line of lines) {
+      if (line.startsWith('m=')) {
+        inMedia = true;
+        const parts = line.split(' ');
+        if (parts.length >= 4) {
+          result.push(`${parts[0]} 0 ${parts[2]} ${parts[3]}`);
+        } else if (parts.length >= 2) {
+          parts[1] = '0';
+          result.push(parts.join(' '));
+        } else {
+          result.push(line);
+        }
+      } else if (inMedia) {
+        if (line.startsWith('a=mid:') || line.startsWith('c=')) {
+          result.push(line);
+        }
+      } else {
+        if (!line.startsWith('a=group:BUNDLE')) {
+          result.push(line);
+        }
+      }
+    }
+    return result.join('\r\n') + '\r\n';
+  };
+
   const startCall = async (type: 'audio' | 'video' | 'screen') => {
     let stream: MediaStream;
     const isRestricted = bandwidthOptimized || connectedCount >= 3;
@@ -1916,7 +2039,14 @@ export default function App() {
 
     // Attach local tracks and notify all peers via call-invite with offer SDP
     peerConnections.current.forEach(async (pc, peerId) => {
-      if (pc.signalingState !== 'stable') {
+      if (pc.signalingState === 'have-local-offer' && pc.localDescription?.sdp) {
+        try {
+          const rejectSdp = createRejectAnswerSdp(pc.localDescription.sdp);
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: rejectSdp }));
+        } catch (e) {
+          console.warn("Reset offer before call invite:", e);
+        }
+      } else if (pc.signalingState !== 'stable') {
         try {
           await pc.setLocalDescription({ type: 'rollback' });
         } catch (e) {
@@ -1924,11 +2054,19 @@ export default function App() {
         }
       }
 
-      stream.getTracks().forEach(track => {
-        if (!pc.getSenders().find(s => s.track === track)) {
+      const senders = pc.getSenders();
+      for (const track of stream.getTracks()) {
+        const sender = senders.find(s => s.track === track || (!s.track && (s as any).track?.kind === track.kind));
+        if (sender && !sender.track) {
+          try {
+            await sender.replaceTrack(track);
+          } catch {
+            pc.addTrack(track, stream);
+          }
+        } else if (!senders.find(s => s.track === track)) {
           pc.addTrack(track, stream);
         }
-      });
+      }
 
       try {
         const offer = await pc.createOffer();
@@ -1942,11 +2080,17 @@ export default function App() {
             isScreenMirror: isScreen,
             callerName: profile.username,
             callerId: profile.id,
+            callerAvatar: profile.avatarImage,
+            callerColor: profile.avatarColor,
             sdp: pc.localDescription
           }));
+          addLog(`Call invite sent to ${peerProfiles[peerId]?.username || 'peer'}`, "info");
+        } else {
+          addLog("Cannot place call: Data tunnel not ready", "err");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error creating call offer for peer " + peerId, err);
+        addLog(`Call offer failed: ${err?.message || err}`, "err");
       }
     });
   };
@@ -1991,11 +2135,19 @@ export default function App() {
           try { await pc.setLocalDescription({ type: 'rollback' }); } catch (_) {}
         }
         await pc.setRemoteDescription(new RTCSessionDescription(incoming.sdp));
-        stream.getTracks().forEach(track => {
-          if (!pc.getSenders().find(s => s.track === track)) {
+        const senders = pc.getSenders();
+        for (const track of stream.getTracks()) {
+          const sender = senders.find(s => s.track === track || (!s.track && (s as any).track?.kind === track.kind));
+          if (sender && !sender.track) {
+            try {
+              await sender.replaceTrack(track);
+            } catch {
+              pc.addTrack(track, stream);
+            }
+          } else if (!senders.find(s => s.track === track)) {
             pc.addTrack(track, stream);
           }
-        });
+        }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         await waitForIce(pc);
@@ -2016,34 +2168,44 @@ export default function App() {
     stopRingChime();
     setIncomingCall(null);
     const pc = peerConnections.current.get(incoming.peerId);
-    if (pc && pc.signalingState !== 'stable') {
+    let declineSdp: RTCSessionDescriptionInit | undefined;
+    if (pc && incoming.sdp) {
       try {
-        await pc.setLocalDescription({ type: 'rollback' });
+        if (pc.signalingState !== 'stable') {
+          try { await pc.setRemoteDescription({ type: 'rollback' }); } catch (_) {}
+        }
+        await pc.setRemoteDescription(new RTCSessionDescription(incoming.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        declineSdp = pc.localDescription || answer;
       } catch (e) {
-        console.warn("Callee rollback on decline:", e);
+        console.warn("Callee formal decline answer generation:", e);
       }
     }
     const dc = dataChannels.current.get(incoming.peerId);
     if (dc && dc.readyState === 'open') {
       dc.send(JSON.stringify({
         type: 'call-decline',
-        by: profile.username
+        by: profile.username,
+        sdp: declineSdp
       }));
     }
     addLog(`Declined call from ${incoming.callerName}`, "info");
   };
 
-  const endCall = useCallback(() => {
+  const endCall = useCallback((notifyPeers: boolean = true) => {
     stopRingChime();
     setIncomingCall(null);
 
-    dataChannels.current.forEach(dc => {
-      if (dc.readyState === 'open') {
-        try {
-          dc.send(JSON.stringify({ type: 'call-end' }));
-        } catch (e) {}
-      }
-    });
+    if (notifyPeers) {
+      dataChannels.current.forEach(dc => {
+        if (dc.readyState === 'open') {
+          try {
+            dc.send(JSON.stringify({ type: 'call-end' }));
+          } catch (e) {}
+        }
+      });
+    }
 
     if (localStreamRef.current) {
       if ((localStreamRef.current as any)._simTimer) {
@@ -2071,18 +2233,24 @@ export default function App() {
     });
     remoteStreamsRef.current = {};
 
-    peerConnections.current.forEach(pc => {
-      if (pc.signalingState !== 'stable') {
+    peerConnections.current.forEach(async (pc) => {
+      if (pc.signalingState === 'have-local-offer' && pc.localDescription?.sdp) {
         try {
-          pc.setLocalDescription({ type: 'rollback' });
+          const rejectSdp = createRejectAnswerSdp(pc.localDescription.sdp);
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: rejectSdp }));
+        } catch (e) {}
+      } else if (pc.signalingState !== 'stable') {
+        try {
+          await pc.setLocalDescription({ type: 'rollback' });
         } catch (e) {}
       }
       pc.getSenders().forEach(sender => {
-        if (sender.track) {
-          try {
-            pc.removeTrack(sender);
-          } catch (e) {}
-        }
+        try {
+          if (sender.track) {
+            sender.track.stop();
+          }
+          pc.removeTrack(sender);
+        } catch (e) {}
       });
     });
 
@@ -2240,6 +2408,7 @@ export default function App() {
       audioData,
       senderName: profile.username,
       senderColor: profile.avatarColor,
+      senderAvatar: profile.avatarImage,
       senderId: profile.id,
       timestamp: new Date().toISOString()
     };
@@ -2279,6 +2448,7 @@ export default function App() {
       sender: 'me',
       senderName: profile.username,
       senderColor: profile.avatarColor,
+      senderAvatar: profile.avatarImage,
       senderId: profile.id,
       timestamp: new Date()
     }]);
@@ -2739,12 +2909,17 @@ export default function App() {
           <button
             onClick={() => setShowProfileModal(true)}
             className="flex items-center justify-center hover:bg-white/40 dark:hover:bg-white/5 rounded-full transition-all group"
+            title="Open Profile Menu & Picture Settings"
           >
             <div className={cn(
-              "w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 rounded-full flex items-center justify-center text-white text-sm md:text-base font-bold shadow-sm group-hover:scale-105 transition-transform",
+              "w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 rounded-full flex items-center justify-center text-white text-sm md:text-base font-bold shadow-sm group-hover:scale-105 transition-transform overflow-hidden relative",
               profile.avatarColor
             )}>
-              {profile.username.charAt(0).toUpperCase()}
+              {profile.avatarImage ? (
+                <img src={profile.avatarImage} alt={profile.username} className="w-full h-full object-cover" />
+              ) : (
+                profile.username.charAt(0).toUpperCase()
+              )}
             </div>
           </button>
           
@@ -2820,6 +2995,7 @@ export default function App() {
               <NexusFailoverHUD 
                 localUsername={profile.username}
                 localAvatarColor={profile.avatarColor}
+                localAvatarImage={profile.avatarImage}
                 localPeerId={profile.id}
                 realConnectedCount={connectedCount}
                 peerProfiles={peerProfiles}
@@ -2950,8 +3126,12 @@ export default function App() {
                                         className="flex gap-3 items-center hover:opacity-80 transition-opacity text-left cursor-pointer outline-none"
                                         onClick={() => setSelectedPeerProfile(p)}
                                       >
-                                        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm", p.avatarColor)}>
-                                          {p.username.charAt(0).toUpperCase()}
+                                        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm overflow-hidden", p.avatarColor)}>
+                                          {p.avatarImage ? (
+                                            <img src={p.avatarImage} alt={p.username} className="w-full h-full object-cover" />
+                                          ) : (
+                                            p.username.charAt(0).toUpperCase()
+                                          )}
                                         </div>
                                         <div className="flex flex-col">
                                           <span className="text-accent text-sm font-semibold truncate max-w-[120px]">{p.username}</span>
@@ -3415,6 +3595,7 @@ export default function App() {
                 <NexusFailoverHUD 
                   localUsername={profile.username}
                   localAvatarColor={profile.avatarColor}
+                  localAvatarImage={profile.avatarImage}
                   localPeerId={profile.id}
                   realConnectedCount={connectedCount}
                   peerProfiles={peerProfiles}
@@ -3508,6 +3689,7 @@ export default function App() {
         type={callType}
         localStream={localStream || localStreamRef.current}
         remoteStreams={remoteStreams}
+        localProfile={profile}
         peerProfiles={peerProfiles}
         peerTrackStates={peerTrackStates}
         screenSharingPeers={screenSharingPeers}
