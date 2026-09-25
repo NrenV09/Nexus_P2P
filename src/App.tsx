@@ -24,7 +24,8 @@ import {
   Info,
   HardDrive,
   Trash2,
-  Network
+  Network,
+  Lock
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -2729,6 +2730,8 @@ export default function App() {
     processFileQueue();
   };
 
+  const isPeerConnectedToHost = role === 'join' && (status === 'connected' || connectedCount > 0);
+
   return (
     <div className="h-screen w-full overflow-hidden flex flex-col relative text-[14px] bg-transparent text-text antialiased">
       <AnimatePresence>
@@ -3062,13 +3065,25 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <button 
-                      onClick={() => { setRole("host"); resetAll(); }}
+                      type="button"
+                      disabled={isPeerConnectedToHost}
+                      onClick={() => { 
+                        if (isPeerConnectedToHost) return;
+                        setRole("host"); 
+                        resetAll(); 
+                      }}
+                      title={isPeerConnectedToHost ? "Disconnect from the handshake menu before hosting a channel" : undefined}
                       className={cn(
-                        "py-2 text-sm font-medium transition-all rounded-xl border",
-                        role === "host" ? "bg-accent text-white border-accent shadow-md" : "border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/30 dark:bg-transparent text-text hover:bg-white/50 dark:hover:bg-black/5 "
+                        "py-2 text-sm font-medium transition-all rounded-xl border flex items-center justify-center gap-1.5",
+                        role === "host" ? "bg-accent text-white border-accent shadow-md" : (
+                          isPeerConnectedToHost
+                            ? "border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-muted/60 cursor-not-allowed opacity-50"
+                            : "border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/30 dark:bg-transparent text-text hover:bg-white/50 dark:hover:bg-black/5 cursor-pointer"
+                        )
                       )}
                     >
-                      Host Channel
+                      {isPeerConnectedToHost && <Lock className="w-3.5 h-3.5 text-muted/70 flex-shrink-0" />}
+                      <span>Host Channel</span>
                     </button>
                     <button 
                       onClick={() => { setRole("join"); resetAll(); }}
