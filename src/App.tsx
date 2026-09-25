@@ -1370,6 +1370,12 @@ export default function App() {
               }));
               setIsCallActive(true);
               setIsCallMinimized(false);
+              setRemoteStreams(prev => {
+                if (prev[peerId]) {
+                  return { ...prev, [peerId]: new MediaStream(prev[peerId].getTracks()) };
+                }
+                return prev;
+              });
               addLog(`${data.username || 'Peer'} started sharing their screen`, "ok");
             } else {
               setScreenSharingPeers(prev => {
@@ -1678,8 +1684,7 @@ export default function App() {
       if (event.streams && event.streams[0]) {
         const stream = event.streams[0];
         setRemoteStreams(prev => {
-          if (prev[id] === stream) return prev;
-          return { ...prev, [id]: stream };
+          return { ...prev, [id]: new MediaStream(stream.getTracks()) };
         });
       } else {
         setRemoteStreams(prev => {
@@ -2322,6 +2327,12 @@ export default function App() {
 
   const handleToggleScreenShare = (sharing: boolean) => {
     setCallType('video');
+    setScreenSharingPeers(prev => {
+      if (sharing) return { ...prev, [profile.id]: true };
+      const next = { ...prev };
+      delete next[profile.id];
+      return next;
+    });
     dataChannels.current.forEach(dc => {
       if (dc.readyState === 'open') {
         try {
