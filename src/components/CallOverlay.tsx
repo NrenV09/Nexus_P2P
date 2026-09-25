@@ -20,7 +20,10 @@ import {
   ShieldCheck,
   Radio,
   Activity,
-  FlipHorizontal
+  FlipHorizontal,
+  RotateCw,
+  RotateCcw,
+  Scan
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { UserProfile } from '../types';
@@ -274,10 +277,66 @@ export function CallOverlay({
     else setInternalMinimized(prev => !prev);
   };
 
+  // Rotation states per tile (0, 90, 180, 270)
+  const [tileRotations, setTileRotations] = useState<Record<string, number>>({});
+  const rotateTile = (id: string) => {
+    setTileRotations(prev => ({
+      ...prev,
+      [id]: ((prev[id] || 0) + 90) % 360
+    }));
+  };
+  const resetTileRotation = (id: string) => {
+    setTileRotations(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  // Floating controls auto-hide in Theater / Full Screen Mode
+  const [showTheaterControls, setShowTheaterControls] = useState(true);
+  const theaterControlsTimeoutRef = useRef<any>(null);
+
+  const resetTheaterControlsTimer = () => {
+    setShowTheaterControls(true);
+    if (theaterControlsTimeoutRef.current) {
+      clearTimeout(theaterControlsTimeoutRef.current);
+    }
+    theaterControlsTimeoutRef.current = setTimeout(() => {
+      setShowTheaterControls(false);
+    }, 3500);
+  };
+
+  useEffect(() => {
+    if (isTheaterMode) {
+      resetTheaterControlsTimer();
+    } else {
+      setShowTheaterControls(true);
+      if (theaterControlsTimeoutRef.current) {
+        clearTimeout(theaterControlsTimeoutRef.current);
+      }
+    }
+  }, [isTheaterMode]);
+
+  // Escape key to exit Full Screen Theater Mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isTheaterMode) {
+        setIsTheaterMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isTheaterMode]);
+
   // Full Screen / Theater Presenter Mode toggle
   const toggleTheaterMode = () => {
     setIsTheaterMode(prev => {
       const next = !prev;
+      if (next && viewMode === 'grid') {
+        setViewMode('spotlight');
+        setSpotlightId(activeSharerId || (remoteEntries.length > 0 ? remoteEntries[0][0] : 'local'));
+      }
       try {
         if (next && !document.fullscreenElement) {
           meetingContainerRef.current?.requestFullscreen?.().catch(() => {});
@@ -760,124 +819,199 @@ export function CallOverlay({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
+              onMouseMove={isTheaterMode ? resetTheaterControlsTimer : undefined}
+              onTouchStart={isTheaterMode ? resetTheaterControlsTimer : undefined}
               className="fixed inset-0 z-[110] bg-[#090a0d] w-full h-full max-h-screen overflow-hidden flex flex-col cursor-default select-none text-white font-sans"
             >
               <div className="w-full h-full flex flex-col overflow-hidden relative bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#181a22]/70 via-[#0d0f14] to-[#08080a]">
                 
-                {/* Top Bar: View Mode Switcher, Call Info & Quick Actions */}
-                <div className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-white/[0.08] bg-[#121419]/90 backdrop-blur-xl flex-shrink-0 z-20">
-                  <div className="flex items-center gap-2 sm:gap-3 overflow-hidden">
-                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-300 shadow-sm">
-                      <span className="relative flex h-2 w-2 flex-shrink-0">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                      </span>
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 hidden xs:inline" />
-                      <span className="font-semibold tracking-wider text-[11px] sm:text-xs">QUANTUM LINK</span>
-                      <span className="text-emerald-500/40">•</span>
-                      <span className="text-zinc-400 truncate hidden sm:inline">
-                        E2EE {type === 'video' ? 'Video' : 'Audio'}
-                      </span>
+                {/* Top Bar: View Mode Switcher, Call Info & Quick Actions (Hidden in Theater Mode to maximize presentation space) */}
+                {!isTheaterMode && (
+                  <div className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-white/[0.08] bg-[#121419]/90 backdrop-blur-xl flex-shrink-0 z-20">
+                    <div className="flex items-center gap-2 sm:gap-3 overflow-hidden">
+                      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-300 shadow-sm">
+                        <span className="relative flex h-2 w-2 flex-shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                        </span>
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 hidden xs:inline" />
+                        <span className="font-semibold tracking-wider text-[11px] sm:text-xs">QUANTUM LINK</span>
+                        <span className="text-emerald-500/40">•</span>
+                        <span className="text-zinc-400 truncate hidden sm:inline">
+                          E2EE {type === 'video' ? 'Video' : 'Audio'}
+                        </span>
+                      </div>
+
+                      {viewMode === 'spotlight' && (
+                        <div className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-medium animate-fadeIn">
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span className="truncate max-w-[160px]">Spotlight: {resolveParticipantName(effectiveSpotlightId || '')}</span>
+                        </div>
+                      )}
+
+                      {/* Active Screen Presenter Indicator Banner */}
+                      {activeSharerId && (
+                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-300 text-xs font-semibold shadow-sm animate-fadeIn">
+                          <MonitorUp className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+                          <span className="truncate max-w-[140px] sm:max-w-none">
+                            {activeSharerId === 'local' ? 'Presenting Screen' : `${resolveParticipantName(activeSharerId)}'s Screen`}
+                          </span>
+                          <button
+                            onClick={toggleTheaterMode}
+                            className="px-2 py-0.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                            title="View presentation in edge-to-edge Full Screen"
+                          >
+                            <Maximize2 className="w-3 h-3" />
+                            <span>Full Screen</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
 
-                    {viewMode === 'spotlight' && (
-                      <div className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-medium animate-fadeIn">
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span className="truncate max-w-[160px]">Spotlight: {resolveParticipantName(effectiveSpotlightId || '')}</span>
-                      </div>
-                    )}
-
-                    {/* Active Screen Presenter Indicator Banner */}
-                    {activeSharerId && (
-                      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-300 text-xs font-semibold shadow-sm animate-fadeIn">
-                        <MonitorUp className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
-                        <span className="truncate max-w-[140px] sm:max-w-none">
-                          {activeSharerId === 'local' ? 'Presenting Screen' : `${resolveParticipantName(activeSharerId)}'s Screen`}
-                        </span>
+                    {/* View Mode & Quick Actions Controls */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* View Mode (Grid vs Spotlight) Segmented Switcher */}
+                      <div className="flex items-center p-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08]">
                         <button
-                          onClick={toggleTheaterMode}
-                          className="px-2 py-0.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
-                          title={isTheaterMode ? "Exit Full Screen" : "View presentation in Full Screen"}
+                          onClick={() => {
+                            setViewMode('grid');
+                            setSpotlightId(null);
+                          }}
+                          className={cn(
+                            "px-2.5 sm:px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
+                            viewMode === 'grid'
+                              ? "bg-white/15 text-white shadow-sm font-semibold"
+                              : "text-zinc-400 hover:text-white"
+                          )}
+                          title="Grid View: See all participants equally"
                         >
-                          {isTheaterMode ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
-                          <span>{isTheaterMode ? "Standard" : "Full Screen"}</span>
+                          <LayoutGrid className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Grid</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setViewMode('spotlight');
+                            setSpotlightId(remoteEntries.length > 0 ? remoteEntries[0][0] : 'local');
+                          }}
+                          className={cn(
+                            "px-2.5 sm:px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
+                            viewMode === 'spotlight'
+                              ? "bg-amber-500 text-zinc-950 shadow-sm font-bold"
+                              : "text-zinc-400 hover:text-white"
+                          )}
+                          title="Spotlight: Focus on active speaker or shared screen"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Spotlight</span>
                         </button>
                       </div>
-                    )}
-                  </div>
 
-                  {/* View Mode & Quick Actions Controls */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {/* View Mode (Grid vs Spotlight) Segmented Switcher */}
-                    <div className="flex items-center p-0.5 rounded-xl bg-white/[0.04] border border-white/[0.08]">
+                      {/* Minimize Button: Return to chat / file transfer while call stays on */}
                       <button
-                        onClick={() => {
-                          setViewMode('grid');
-                          setSpotlightId(null);
-                        }}
-                        className={cn(
-                          "px-2.5 sm:px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
-                          viewMode === 'grid'
-                            ? "bg-white/15 text-white shadow-sm font-semibold"
-                            : "text-zinc-400 hover:text-white"
-                        )}
-                        title="Grid View: See all participants equally"
+                        onClick={toggleMinimize}
+                        className="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border bg-white/[0.05] text-zinc-300 border-white/[0.08] hover:bg-white/[0.1] hover:text-white"
+                        title="Minimize to Picture-in-Picture to use Secure Chat and File Transfer"
                       >
-                        <LayoutGrid className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Grid</span>
+                        <Minimize2 className="w-3.5 h-3.5 text-blue-400" />
+                        <span className="hidden md:inline">Minimize</span>
                       </button>
 
+                      {/* Quick Leave in header */}
                       <button
-                        onClick={() => {
-                          setViewMode('spotlight');
-                          setSpotlightId(remoteEntries.length > 0 ? remoteEntries[0][0] : 'local');
-                        }}
-                        className={cn(
-                          "px-2.5 sm:px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer",
-                          viewMode === 'spotlight'
-                            ? "bg-amber-500 text-zinc-950 shadow-sm font-bold"
-                            : "text-zinc-400 hover:text-white"
-                        )}
-                        title="Spotlight: Focus on active speaker or shared screen"
+                        onClick={onEndCall}
+                        className="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30"
+                        title="Leave call"
                       >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Spotlight</span>
+                        <PhoneOff className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Leave</span>
                       </button>
                     </div>
-
-                    {/* Minimize Button: Return to chat / file transfer while call stays on */}
-                    <button
-                      onClick={toggleMinimize}
-                      className="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border bg-white/[0.05] text-zinc-300 border-white/[0.08] hover:bg-white/[0.1] hover:text-white"
-                      title="Minimize to Picture-in-Picture to use Secure Chat and File Transfer"
-                    >
-                      <Minimize2 className="w-3.5 h-3.5 text-blue-400" />
-                      <span className="hidden md:inline">Minimize</span>
-                    </button>
-
-                    {/* Quick Leave in header */}
-                    <button
-                      onClick={onEndCall}
-                      className="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30"
-                      title="Leave call"
-                    >
-                      <PhoneOff className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Leave</span>
-                    </button>
                   </div>
-                </div>
+                )}
+
+                {/* Floating Top Control Bar (Rendered only in Theater / Full Screen Mode) */}
+                {isTheaterMode && (
+                  <div 
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className={cn(
+                      "absolute top-3 left-3 right-3 flex items-center justify-between z-40 transition-opacity duration-300",
+                      showTheaterControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+                    )}
+                  >
+                    {/* Left: Presenter Badge & Rotation status */}
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-600/90 backdrop-blur-xl border border-blue-400/40 text-white text-xs font-semibold shadow-2xl">
+                        <MonitorUp className="w-3.5 h-3.5 text-blue-200 animate-pulse" />
+                        <span>
+                          {effectiveSpotlightId === 'local' ? 'Presenting Screen' : `${resolveParticipantName(effectiveSpotlightId || '')}'s Screen`}
+                        </span>
+                        <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded text-blue-200 uppercase font-mono">1080p</span>
+                      </div>
+
+                      {tileRotations[effectiveSpotlightId || 'local'] ? (
+                        <button
+                          onClick={() => resetTileRotation(effectiveSpotlightId || 'local')}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-medium cursor-pointer shadow-md hover:bg-amber-500/30 transition-colors"
+                          title="Reset rotation to 0°"
+                        >
+                          <RotateCw className="w-3 h-3 text-amber-300" />
+                          <span>Rotated {tileRotations[effectiveSpotlightId || 'local']}° (Reset)</span>
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {/* Right: Quick actions: Rotate, Fit/Fill, and Exit Full Screen */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => rotateTile(effectiveSpotlightId || 'local')}
+                        className="px-3 py-1.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-xl text-white text-xs font-medium border border-white/10 flex items-center gap-1.5 shadow-xl transition-all cursor-pointer"
+                        title="Rotate presentation 90 degrees"
+                      >
+                        <RotateCw className="w-3.5 h-3.5 text-zinc-300" />
+                        <span>Rotate 90°</span>
+                      </button>
+
+                      <button
+                        onClick={() => toggleTileFit(effectiveSpotlightId || 'local')}
+                        className="px-3 py-1.5 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur-xl text-white text-xs font-medium border border-white/10 flex items-center gap-1.5 shadow-xl transition-all cursor-pointer"
+                        title={tileFitModes[effectiveSpotlightId || 'local'] === 'contain' ? "Zoom to fill screen" : "Fit whole presentation without cropping"}
+                      >
+                        <Scan className="w-3.5 h-3.5 text-zinc-300" />
+                        <span>{tileFitModes[effectiveSpotlightId || 'local'] === 'contain' ? 'Fit (Full)' : 'Fill'}</span>
+                      </button>
+
+                      <button
+                        onClick={toggleTheaterMode}
+                        className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs flex items-center gap-1.5 shadow-2xl transition-all cursor-pointer ring-2 ring-amber-300/40"
+                        title="Exit Full Screen Presenter view (Esc)"
+                      >
+                        <Minimize2 className="w-3.5 h-3.5 text-zinc-950" />
+                        <span>Exit Full Screen</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Main Meeting Stage Area */}
-                <div className="flex-1 min-h-0 w-full p-2 sm:p-3 md:p-4 flex flex-col items-center justify-center overflow-hidden relative">
+                <div className={cn(
+                  "flex-1 min-h-0 w-full flex flex-col items-center justify-center overflow-hidden relative",
+                  isTheaterMode ? "p-0" : "p-2 sm:p-3 md:p-4"
+                )}>
                   
                   {/* 1. SPOTLIGHT MODE LAYOUT */}
                   {viewMode === 'spotlight' && (
-                    <div className="w-full h-full flex flex-col md:flex-row gap-2.5 sm:gap-3.5 overflow-hidden min-h-0">
+                    <div className={cn(
+                      "w-full h-full flex flex-col md:flex-row overflow-hidden min-h-0",
+                      isTheaterMode ? "gap-0" : "gap-2.5 sm:gap-3.5"
+                    )}>
                       
                       {/* Spotlight Main Stage (Hero Area) */}
                       <div className={cn(
-                        "flex-1 min-h-0 h-full flex items-center justify-center relative bg-[#0e1014] rounded-2xl sm:rounded-3xl overflow-hidden border border-white/[0.1] shadow-2xl ring-1 ring-white/5 transition-all duration-300",
-                        isTheaterMode && "w-full max-w-full rounded-xl sm:rounded-2xl border-blue-500/30 shadow-[0_0_40px_rgba(59,130,246,0.15)] ring-1 ring-blue-500/20"
+                        "flex-1 min-h-0 h-full flex items-center justify-center relative bg-[#0e1014] overflow-hidden transition-all duration-300",
+                        isTheaterMode 
+                          ? "w-full max-w-full rounded-none border-0 shadow-none ring-0 bg-black" 
+                          : "rounded-2xl sm:rounded-3xl border border-white/[0.1] shadow-2xl ring-1 ring-white/5"
                       )}>
                         {effectiveSpotlightId === 'local' ? (
                           <LocalVideoTile 
@@ -890,10 +1024,12 @@ export function CallOverlay({
                             avatarImage={resolveParticipantAvatar('local')}
                             avatarColor={resolveParticipantColor('local')}
                             fitMode={tileFitModes['local'] || 'contain'}
+                            rotation={tileRotations['local'] || 0}
                             isSpotlightStage={true}
                             isTheaterMode={isTheaterMode}
                             onToggleFit={() => toggleTileFit('local')}
                             onToggleTheater={toggleTheaterMode}
+                            onRotate={() => rotateTile('local')}
                             onUnspotlight={() => { setViewMode('grid'); setSpotlightId(null); setIsTheaterMode(false); }}
                           />
                         ) : (
@@ -908,10 +1044,12 @@ export function CallOverlay({
                               isRemoteAudioMuted={peerTrackStates?.[effectiveSpotlightId]?.audio === false}
                               isScreenSharing={!!screenSharingPeers?.[effectiveSpotlightId]}
                               fitMode={tileFitModes[effectiveSpotlightId] || 'contain'}
+                              rotation={tileRotations[effectiveSpotlightId] || 0}
                               isSpotlightStage={true}
                               isTheaterMode={isTheaterMode}
                               onToggleFit={() => toggleTileFit(effectiveSpotlightId)}
                               onToggleTheater={toggleTheaterMode}
+                              onRotate={() => rotateTile(effectiveSpotlightId)}
                               onUnspotlight={() => { setViewMode('grid'); setSpotlightId(null); setIsTheaterMode(false); }}
                             />
                           )
@@ -1014,7 +1152,9 @@ export function CallOverlay({
                           avatarImage={resolveParticipantAvatar('local')}
                           avatarColor={resolveParticipantColor('local')}
                           fitMode={tileFitModes['local'] || (isScreenSharing ? 'contain' : 'contain')}
+                          rotation={tileRotations['local'] || 0}
                           onToggleFit={() => toggleTileFit('local')}
+                          onRotate={() => rotateTile('local')}
                           onSpotlight={() => handleSpotlight('local')}
                         />
                       </div>
@@ -1038,7 +1178,9 @@ export function CallOverlay({
                               isRemoteAudioMuted={trackState?.audio === false}
                               isScreenSharing={!!screenSharingPeers?.[id]}
                               fitMode={tileFitModes[id] || 'contain'}
+                              rotation={tileRotations[id] || 0}
                               onToggleFit={() => toggleTileFit(id)}
+                              onRotate={() => rotateTile(id)}
                               onSpotlight={() => handleSpotlight(id)}
                             />
                           </div>
@@ -1067,141 +1209,237 @@ export function CallOverlay({
 
                 </div>
 
-                {/* Bottom Control Bar (Modern Elevated Island Dock) */}
-                <div className="h-16 sm:h-20 bg-[#121419]/95 backdrop-blur-2xl border-t border-white/[0.08] flex items-center justify-between px-3 sm:px-6 md:px-8 flex-shrink-0 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
-                  {/* Left side: Time & Status */}
-                  <div className="hidden md:flex items-center text-xs font-medium text-zinc-300 w-1/4">
-                    <span className="font-mono text-sm tracking-wide text-zinc-200">
-                      {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </span>
-                    <span className="mx-3 text-white/20">|</span>
-                    <span className="truncate text-zinc-400 text-xs flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      E2EE Direct P2P
-                    </span>
-                  </div>
-
-                  {/* Center: Controls */}
-                  <div className="flex items-center justify-center gap-2 sm:gap-3 md:gap-3.5 w-full md:w-auto">
-                    {/* Mic Toggle */}
-                    <button 
-                      onClick={toggleMic}
-                      className={cn(
-                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
-                        isMicMuted 
-                          ? "bg-rose-600 text-white hover:bg-rose-500 shadow-rose-600/30 border border-rose-400/40" 
-                          : "bg-white/[0.08] text-emerald-400 hover:bg-white/[0.14] border border-white/[0.08] hover:border-emerald-500/40"
-                      )}
-                      title={isMicMuted ? "Turn on microphone" : "Turn off microphone"}
-                    >
-                      {isMicMuted ? <MicOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Mic className="w-4 h-4 sm:w-5 sm:h-5" />}
-                    </button>
-
-                    {/* Video Toggle */}
-                    <button 
-                      onClick={toggleVideo}
-                      className={cn(
-                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
-                        isVideoOff
-                          ? "bg-rose-600 text-white hover:bg-rose-500 shadow-rose-600/30 border border-rose-400/40" 
-                          : "bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08]"
-                      )}
-                      title={isVideoOff ? "Turn on camera" : "Turn off camera"}
-                    >
-                      {isVideoOff ? <VideoOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Video className="w-4 h-4 sm:w-5 sm:h-5" />}
-                    </button>
-
-                    {/* Screen Share / Mirror Screen Toggle */}
-                    <button 
-                      onClick={toggleScreenShare}
-                      className={cn(
-                        "h-10 sm:h-11 md:h-12 px-3 sm:px-4 rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer shadow-md font-medium text-xs sm:text-sm",
-                        isScreenSharing
-                          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/40 ring-2 ring-blue-400/50 border border-blue-300/40 font-semibold" 
-                          : remoteScreenSharerId
-                            ? "bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 border border-blue-500/40"
-                            : "bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08] hover:border-blue-400/40"
-                      )}
-                      title={
-                        isScreenSharing 
-                          ? "You are actively sharing your screen • Click to stop" 
-                          : remoteScreenSharerId 
-                            ? `${resolveParticipantName(remoteScreenSharerId)} is sharing screen • Click to share your own`
-                            : "Mirror / Share Screen (Full 1080p Presentation)"
-                      }
-                    >
-                      <MonitorUp className={cn("w-4 h-4 sm:w-5 sm:h-5", isScreenSharing && "animate-pulse")} />
-                      <span className="hidden sm:inline">
-                        {isScreenSharing ? "Stop Sharing" : remoteScreenSharerId ? "Screen Active" : "Mirror Screen"}
-                      </span>
-                    </button>
-
-                    {/* Dedicated Full Screen Presenter / Theater View Button */}
-                    {(isAnyScreenSharing || viewMode === 'spotlight') && (
-                      <button 
-                        onClick={toggleTheaterMode}
-                        className={cn(
-                          "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
-                          isTheaterMode
-                            ? "bg-sky-500 text-zinc-950 font-bold shadow-sky-500/40 ring-2 ring-sky-300 border border-sky-300"
-                            : "bg-white/[0.08] text-sky-400 hover:bg-white/[0.14] border border-white/[0.08] hover:border-sky-400/40"
-                        )}
-                        title={isTheaterMode ? "Exit Full Screen Presenter View" : "Full Screen Presenter View (Maximize screen)"}
-                      >
-                        {isTheaterMode ? <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5" /> : <Maximize2 className="w-4 h-4 sm:w-5 sm:h-5" />}
-                      </button>
+                {/* Floating Bottom Mini-Dock for Theater / Full Screen Mode */}
+                {isTheaterMode && (
+                  <div 
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className={cn(
+                      "absolute bottom-5 left-1/2 -translate-x-1/2 z-40 transition-opacity duration-300",
+                      showTheaterControls ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
                     )}
+                  >
+                    <div className="flex items-center gap-2 sm:gap-3 px-3.5 py-2 rounded-2xl bg-[#121419]/90 backdrop-blur-2xl border border-white/10 shadow-[0_10px_40px_rgba(0,0,0,0.7)]">
+                      {/* Mic Toggle */}
+                      <button 
+                        onClick={toggleMic}
+                        className={cn(
+                          "w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer",
+                          isMicMuted ? "bg-rose-600 text-white" : "bg-white/10 text-emerald-400 hover:bg-white/20"
+                        )}
+                        title={isMicMuted ? "Unmute microphone" : "Mute microphone"}
+                      >
+                        {isMicMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      </button>
 
-                    {/* View Mode (Grid vs Spotlight) Toggle */}
-                    <button 
-                      onClick={() => {
-                        if (viewMode === 'spotlight') {
-                          setViewMode('grid');
-                          setSpotlightId(null);
-                        } else {
-                          setViewMode('spotlight');
-                          setSpotlightId(remoteEntries.length > 0 ? remoteEntries[0][0] : 'local');
-                        }
-                      }}
-                      className={cn(
-                        "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
-                        viewMode === 'spotlight'
-                          ? "bg-amber-500 text-zinc-950 font-bold shadow-amber-500/30 border border-amber-300"
-                          : "bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08] hover:border-amber-400/40"
-                      )}
-                      title={viewMode === 'spotlight' ? "Exit Spotlight mode" : "Spotlight mode"}
-                    >
-                      {viewMode === 'spotlight' ? <PinOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />}
-                    </button>
+                      {/* Video Toggle */}
+                      <button 
+                        onClick={toggleVideo}
+                        className={cn(
+                          "w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer",
+                          isVideoOff ? "bg-rose-600 text-white" : "bg-white/10 text-zinc-200 hover:bg-white/20"
+                        )}
+                        title={isVideoOff ? "Turn on camera" : "Turn off camera"}
+                      >
+                        {isVideoOff ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+                      </button>
 
-                    {/* Minimize to PiP Toggle */}
-                    <button
-                      onClick={toggleMinimize}
-                      className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08]"
-                      title="Minimize to Picture-in-Picture (use chat & file transfer)"
-                    >
-                      <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
-                    </button>
+                      {/* Screen Share / Stop Sharing */}
+                      <button 
+                        onClick={toggleScreenShare}
+                        className={cn(
+                          "h-9 px-3 rounded-xl flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition-all",
+                          isScreenSharing 
+                            ? "bg-blue-600 text-white shadow-md shadow-blue-600/30" 
+                            : "bg-white/10 text-zinc-200 hover:bg-white/20"
+                        )}
+                        title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+                      >
+                        <MonitorUp className="w-3.5 h-3.5 text-blue-300" />
+                        <span>{isScreenSharing ? "Stop Sharing" : "Share Screen"}</span>
+                      </button>
 
-                    {/* End Call Button */}
-                    <button 
-                      onClick={onEndCall} 
-                      className="h-10 sm:h-11 md:h-12 px-4 sm:px-6 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-medium flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all active:scale-95 cursor-pointer ml-1 sm:ml-2 border border-rose-400/30"
-                      title="Leave call"
-                    >
-                      <PhoneOff className="w-4 h-4 sm:w-5 sm:h-5" />
-                      <span className="text-xs sm:text-sm font-semibold tracking-wide hidden sm:inline">Leave</span>
-                    </button>
-                  </div>
+                      {/* Exit Full Screen */}
+                      <button
+                        onClick={toggleTheaterMode}
+                        className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-zinc-950 cursor-pointer shadow-md transition-all active:scale-95"
+                        title="Exit Full Screen (Esc)"
+                      >
+                        <Minimize2 className="w-3.5 h-3.5" />
+                        <span>Exit Full Screen</span>
+                      </button>
 
-                  {/* Right side: Participant info */}
-                  <div className="hidden md:flex items-center justify-end gap-3 w-1/4 text-zinc-300">
-                    <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/[0.05] border border-white/[0.08] text-xs font-medium text-zinc-300">
-                      <Users className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>{totalParticipants} participant{totalParticipants > 1 ? 's' : ''}</span>
+                      {/* Leave Call */}
+                      <button 
+                        onClick={onEndCall}
+                        className="w-9 h-9 rounded-xl flex items-center justify-center bg-rose-600 hover:bg-rose-500 text-white cursor-pointer shadow-md active:scale-95 transition-all"
+                        title="Leave call"
+                      >
+                        <PhoneOff className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                </div>
+                )}
+
+                {/* Bottom Control Bar (Modern Elevated Island Dock) - Hidden in Theater Mode */}
+                {!isTheaterMode && (
+                  <div className="h-16 sm:h-20 bg-[#121419]/95 backdrop-blur-2xl border-t border-white/[0.08] flex items-center justify-between px-3 sm:px-6 md:px-8 flex-shrink-0 z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+                    {/* Left side: Time & Status */}
+                    <div className="hidden md:flex items-center text-xs font-medium text-zinc-300 w-1/4">
+                      <span className="font-mono text-sm tracking-wide text-zinc-200">
+                        {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </span>
+                      <span className="mx-3 text-white/20">|</span>
+                      <span className="truncate text-zinc-400 text-xs flex items-center gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        E2EE Direct P2P
+                      </span>
+                    </div>
+
+                    {/* Center: Controls */}
+                    <div className="flex items-center justify-center gap-2 sm:gap-3 md:gap-3.5 w-full md:w-auto">
+                      {/* Mic Toggle */}
+                      <button 
+                        onClick={toggleMic}
+                        className={cn(
+                          "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
+                          isMicMuted 
+                            ? "bg-rose-600 text-white hover:bg-rose-500 shadow-rose-600/30 border border-rose-400/40" 
+                            : "bg-white/[0.08] text-emerald-400 hover:bg-white/[0.14] border border-white/[0.08] hover:border-emerald-500/40"
+                        )}
+                        title={isMicMuted ? "Turn on microphone" : "Turn off microphone"}
+                      >
+                        {isMicMuted ? <MicOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Mic className="w-4 h-4 sm:w-5 sm:h-5" />}
+                      </button>
+
+                      {/* Video Toggle */}
+                      <button 
+                        onClick={toggleVideo}
+                        className={cn(
+                          "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
+                          isVideoOff
+                            ? "bg-rose-600 text-white hover:bg-rose-500 shadow-rose-600/30 border border-rose-400/40" 
+                            : "bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08]"
+                        )}
+                        title={isVideoOff ? "Turn on camera" : "Turn off camera"}
+                      >
+                        {isVideoOff ? <VideoOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Video className="w-4 h-4 sm:w-5 sm:h-5" />}
+                      </button>
+
+                      {/* Screen Share / Mirror Screen Actions */}
+                      {isScreenSharing ? (
+                        /* Local user is actively presenting */
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                          <button 
+                            onClick={toggleScreenShare}
+                            className="h-10 sm:h-11 md:h-12 px-3 sm:px-4 rounded-2xl flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/40 ring-2 ring-blue-400/50 border border-blue-300/40 font-semibold cursor-pointer active:scale-95 text-xs sm:text-sm"
+                            title="You are actively mirroring your screen. Click to stop presenting."
+                          >
+                            <MonitorUp className="w-4 h-4 sm:w-5 sm:h-5 text-white animate-pulse" />
+                            <span>Stop Sharing</span>
+                          </button>
+                          <button 
+                            onClick={toggleTheaterMode}
+                            className="h-10 sm:h-11 md:h-12 px-3 sm:px-4 rounded-2xl flex items-center justify-center gap-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-400/40 font-semibold cursor-pointer active:scale-95 shadow-md text-xs sm:text-sm transition-all"
+                            title="View your screen presentation in edge-to-edge Full Screen"
+                          >
+                            <Maximize2 className="w-4 h-4 sm:w-5 sm:h-5 text-sky-400" />
+                            <span className="hidden sm:inline">Full Screen</span>
+                          </button>
+                        </div>
+                      ) : remoteScreenSharerId ? (
+                        /* Remote peer is actively presenting screen */
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                          <button 
+                            onClick={toggleTheaterMode}
+                            className="h-10 sm:h-11 md:h-12 px-3.5 sm:px-5 rounded-2xl flex items-center justify-center gap-2 bg-gradient-to-r from-sky-400 via-sky-500 to-blue-600 hover:from-sky-300 hover:to-blue-500 text-zinc-950 font-bold shadow-lg shadow-sky-500/35 ring-2 ring-sky-300/80 border border-sky-200 cursor-pointer active:scale-95 transition-all text-xs sm:text-sm"
+                            title={`View ${resolveParticipantName(remoteScreenSharerId)}'s presentation in Full Screen`}
+                          >
+                            <Maximize2 className="w-4 h-4 sm:w-5 sm:h-5 text-zinc-950" />
+                            <span>Full Screen Presenter</span>
+                          </button>
+                          <button 
+                            onClick={toggleScreenShare}
+                            className="h-10 sm:h-11 md:h-12 px-3 sm:px-3.5 rounded-2xl flex items-center justify-center gap-2 bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08] hover:border-blue-400/40 cursor-pointer active:scale-95 transition-all text-xs sm:text-sm font-medium"
+                            title="Share your own screen"
+                          >
+                            <MonitorUp className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+                            <span className="hidden md:inline">Share My Screen</span>
+                          </button>
+                        </div>
+                      ) : (
+                        /* No active screen share */
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                          <button 
+                            onClick={toggleScreenShare}
+                            className="h-10 sm:h-11 md:h-12 px-3 sm:px-4 rounded-2xl flex items-center justify-center gap-2 bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08] hover:border-blue-400/40 cursor-pointer active:scale-95 transition-all text-xs sm:text-sm font-medium"
+                            title="Mirror / Share Screen (Full 1080p Presentation)"
+                          >
+                            <MonitorUp className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+                            <span className="hidden sm:inline">Mirror Screen</span>
+                          </button>
+                          {viewMode === 'spotlight' && (
+                            <button 
+                              onClick={toggleTheaterMode}
+                              className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center bg-white/[0.08] text-sky-400 hover:bg-white/[0.14] border border-white/[0.08] hover:border-sky-400/40 cursor-pointer active:scale-95 transition-all shadow-md"
+                              title="Full Screen Spotlight View"
+                            >
+                              <Maximize2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* View Mode (Grid vs Spotlight) Toggle */}
+                      <button 
+                        onClick={() => {
+                          if (viewMode === 'spotlight') {
+                            setViewMode('grid');
+                            setSpotlightId(null);
+                          } else {
+                            setViewMode('spotlight');
+                            setSpotlightId(remoteEntries.length > 0 ? remoteEntries[0][0] : 'local');
+                          }
+                        }}
+                        className={cn(
+                          "w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md",
+                          viewMode === 'spotlight'
+                            ? "bg-amber-500 text-zinc-950 font-bold shadow-amber-500/30 border border-amber-300"
+                            : "bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08] hover:border-amber-400/40"
+                        )}
+                        title={viewMode === 'spotlight' ? "Exit Spotlight mode" : "Spotlight mode"}
+                      >
+                        {viewMode === 'spotlight' ? <PinOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />}
+                      </button>
+
+                      {/* Minimize to PiP Toggle */}
+                      <button
+                        onClick={toggleMinimize}
+                        className="w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-md bg-white/[0.08] text-zinc-200 hover:bg-white/[0.14] border border-white/[0.08]"
+                        title="Minimize to Picture-in-Picture (use chat & file transfer)"
+                      >
+                        <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+                      </button>
+
+                      {/* End Call Button */}
+                      <button 
+                        onClick={onEndCall} 
+                        className="h-10 sm:h-11 md:h-12 px-4 sm:px-6 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-medium flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all active:scale-95 cursor-pointer ml-1 sm:ml-2 border border-rose-400/30"
+                        title="Leave call"
+                      >
+                        <PhoneOff className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <span className="text-xs sm:text-sm font-semibold tracking-wide hidden sm:inline">Leave</span>
+                      </button>
+                    </div>
+
+                    {/* Right side: Participant info */}
+                    <div className="hidden md:flex items-center justify-end gap-3 w-1/4 text-zinc-300">
+                      <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/[0.05] border border-white/[0.08] text-xs font-medium text-zinc-300">
+                        <Users className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>{totalParticipants} participant{totalParticipants > 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
@@ -1224,11 +1462,13 @@ interface LocalVideoTileProps {
   avatarImage?: string;
   avatarColor?: string;
   fitMode?: 'contain' | 'cover';
+  rotation?: number;
   isSpotlightStage?: boolean;
   isThumbnail?: boolean;
   isTheaterMode?: boolean;
   onToggleFit?: () => void;
   onToggleTheater?: () => void;
+  onRotate?: () => void;
   onSpotlight?: () => void;
   onUnspotlight?: () => void;
 }
@@ -1243,15 +1483,38 @@ function LocalVideoTile({
   avatarImage,
   avatarColor,
   fitMode = 'contain',
+  rotation = 0,
   isSpotlightStage = false,
   isThumbnail = false,
   isTheaterMode = false,
   onToggleFit,
   onToggleTheater,
+  onRotate,
   onSpotlight,
   onUnspotlight
 }: LocalVideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const tileContainerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const isRotatedQuarter = rotation === 90 || rotation === 270;
+
+  useEffect(() => {
+    if (!tileContainerRef.current) return;
+    const updateScale = () => {
+      if (!tileContainerRef.current) return;
+      const { clientWidth: w, clientHeight: h } = tileContainerRef.current;
+      if (isRotatedQuarter && w && h) {
+        setScale(Math.min(w, h) / Math.max(w, h));
+      } else {
+        setScale(1);
+      }
+    };
+    updateScale();
+    const obs = new ResizeObserver(updateScale);
+    obs.observe(tileContainerRef.current);
+    return () => obs.disconnect();
+  }, [isRotatedQuarter]);
+
   const [aspectLandscape, setAspectLandscape] = useState(false);
   const [manualMirror, setManualMirror] = useState<boolean | null>(null);
 
@@ -1304,6 +1567,7 @@ function LocalVideoTile({
 
   return (
     <div 
+      ref={tileContainerRef}
       onDoubleClick={() => onToggleTheater ? onToggleTheater() : onToggleFit?.()}
       title={isScreenSharing ? "Double-click to toggle Full Screen presentation" : undefined}
       className={cn(
@@ -1318,13 +1582,13 @@ function LocalVideoTile({
         playsInline 
         muted 
         onLoadedMetadata={handleMetadata}
+        style={{
+          transform: `rotate(${rotation}deg) scale(${scale})${!isScreenSharing && !hasActiveScreenTrack && (manualMirror !== null ? manualMirror : true) ? ' scaleX(-1)' : ''}`,
+          transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
+        }}
         className={cn(
-          "w-full h-full transition-all duration-150",
+          "w-full h-full",
           fitMode === 'contain' ? "object-contain" : "object-cover",
-          // Never flip screen share horizontally:
-          (!isScreenSharing && !hasActiveScreenTrack && (manualMirror !== null ? manualMirror : true)) 
-            ? "transform -scale-x-100" 
-            : "transform-none",
           showVideo ? "opacity-100" : "opacity-0 pointer-events-none absolute inset-0"
         )}
       />
@@ -1377,6 +1641,23 @@ function LocalVideoTile({
             >
               {isTheaterMode ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               <span className="text-[11px] hidden sm:inline">{isTheaterMode ? 'Exit Full Screen' : 'Full Screen'}</span>
+            </button>
+          )}
+
+          {/* Rotate 90 degrees button */}
+          {onRotate && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRotate(); }}
+              className={cn(
+                "px-2.5 py-1.5 rounded-xl text-xs font-medium backdrop-blur-xl border flex items-center gap-1.5 shadow-md cursor-pointer transition-all",
+                rotation > 0
+                  ? "bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold border-amber-300 shadow-amber-500/30"
+                  : "bg-black/60 hover:bg-black/85 text-white/90 border-white/10"
+              )}
+              title={`Rotate 90° (Currently ${rotation}°)`}
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span className="text-[11px]">{rotation > 0 ? `${rotation}°` : 'Rotate'}</span>
             </button>
           )}
 
@@ -1485,11 +1766,13 @@ function RemoteVideoTile({
   isRemoteAudioMuted,
   isScreenSharing = false,
   fitMode = 'contain',
+  rotation = 0,
   isSpotlightStage = false,
   isThumbnail = false,
   isTheaterMode = false,
   onToggleFit,
   onToggleTheater,
+  onRotate,
   onSpotlight,
   onUnspotlight
 }: { 
@@ -1502,15 +1785,38 @@ function RemoteVideoTile({
   isRemoteAudioMuted?: boolean;
   isScreenSharing?: boolean;
   fitMode?: 'contain' | 'cover';
+  rotation?: number;
   isSpotlightStage?: boolean;
   isThumbnail?: boolean;
   isTheaterMode?: boolean;
   onToggleFit?: () => void;
   onToggleTheater?: () => void;
+  onRotate?: () => void;
   onSpotlight?: () => void;
   onUnspotlight?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const tileContainerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const isRotatedQuarter = rotation === 90 || rotation === 270;
+
+  useEffect(() => {
+    if (!tileContainerRef.current) return;
+    const updateScale = () => {
+      if (!tileContainerRef.current) return;
+      const { clientWidth: w, clientHeight: h } = tileContainerRef.current;
+      if (isRotatedQuarter && w && h) {
+        setScale(Math.min(w, h) / Math.max(w, h));
+      } else {
+        setScale(1);
+      }
+    };
+    updateScale();
+    const obs = new ResizeObserver(updateScale);
+    obs.observe(tileContainerRef.current);
+    return () => obs.disconnect();
+  }, [isRotatedQuarter]);
+
   const [hasVideoTrack, setHasVideoTrack] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
 
@@ -1560,6 +1866,7 @@ function RemoteVideoTile({
 
   return (
     <div 
+      ref={tileContainerRef}
       onDoubleClick={() => onToggleTheater ? onToggleTheater() : onToggleFit?.()}
       title={isScreenSharing ? "Double-click to toggle Full Screen presentation" : undefined}
       className={cn(
@@ -1589,8 +1896,12 @@ function RemoteVideoTile({
         playsInline 
         muted
         onLoadedMetadata={handleMetadata}
+        style={{
+          transform: `rotate(${rotation}deg) scale(${scale})`,
+          transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
+        }}
         className={cn(
-          "w-full h-full transition-all duration-150",
+          "w-full h-full",
           fitMode === 'contain' ? "object-contain" : "object-cover",
           !showVideo ? "opacity-0 pointer-events-none absolute inset-0" : "opacity-100"
         )}
@@ -1624,7 +1935,7 @@ function RemoteVideoTile({
         </div>
       )}
 
-      {/* Top Controls: Spotlight & Fit Mode */}
+      {/* Top Controls: Spotlight, Rotate & Fit Mode */}
       {!isThumbnail && (
         <div className={cn(
           "absolute top-3 right-3 flex items-center gap-1.5 z-20 transition-opacity",
@@ -1644,6 +1955,23 @@ function RemoteVideoTile({
             >
               {isTheaterMode ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               <span className="text-[11px] hidden sm:inline">{isTheaterMode ? 'Exit Full Screen' : 'Full Screen'}</span>
+            </button>
+          )}
+
+          {/* Rotate 90 degrees button */}
+          {onRotate && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRotate(); }}
+              className={cn(
+                "px-2.5 py-1.5 rounded-xl text-xs font-medium backdrop-blur-xl border flex items-center gap-1.5 shadow-md cursor-pointer transition-all",
+                rotation > 0
+                  ? "bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold border-amber-300 shadow-amber-500/30"
+                  : "bg-black/60 hover:bg-black/85 text-white/90 border-white/10"
+              )}
+              title={`Rotate 90° (Currently ${rotation}°)`}
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span className="text-[11px]">{rotation > 0 ? `${rotation}°` : 'Rotate'}</span>
             </button>
           )}
 

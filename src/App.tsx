@@ -1363,10 +1363,15 @@ export default function App() {
           } else if (data.type === 'screen-share-state') {
             setCallType('video');
             if (data.sharing) {
-              setScreenSharingPeers(prev => ({ ...prev, [peerId]: true }));
+              setScreenSharingPeers(prev => ({ 
+                ...prev, 
+                [peerId]: true,
+                ...(data.peerId ? { [data.peerId]: true } : {})
+              }));
               setPeerTrackStates(prev => ({
                 ...prev,
-                [peerId]: { ...prev[peerId], video: true }
+                [peerId]: { ...prev[peerId], video: true },
+                ...(data.peerId ? { [data.peerId]: { ...prev[data.peerId], video: true } } : {})
               }));
               setIsCallActive(true);
               setIsCallMinimized(false);
@@ -1381,6 +1386,7 @@ export default function App() {
               setScreenSharingPeers(prev => {
                 const next = { ...prev };
                 delete next[peerId];
+                if (data.peerId) delete next[data.peerId];
                 return next;
               });
               addLog(`${data.username || 'Peer'} stopped sharing their screen`, "info");
