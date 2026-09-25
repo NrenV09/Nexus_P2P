@@ -2723,13 +2723,13 @@ export default function App() {
             </button>
           )}
 
-          {/* Light button (INFO) icon beside the profile icon */}
+          {/* Info Button */}
           <button
             onClick={() => {
               setInfoModalTab('guide');
               setShowInfoModal(true);
             }}
-            className="w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 flex items-center justify-center text-sky-500 dark:text-sky-400 hover:text-sky-600 dark:hover:text-sky-300 transition-all border border-sky-500/30 dark:border-sky-400/30 bg-sky-500/10 dark:bg-sky-400/10 hover:bg-sky-500/20 dark:hover:bg-sky-400/20 backdrop-blur rounded-xl lg:rounded-2xl shadow-sm hover:scale-105 cursor-pointer flex-shrink-0"
+            className="w-8 h-8 md:w-9 md:h-9 lg:w-10 lg:h-10 flex items-center justify-center text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 transition-colors border border-white/40 dark:border-white/10 bg-white/30 dark:bg-transparent hover:bg-white/50 dark:hover:bg-white/10 backdrop-blur rounded-xl lg:rounded-2xl shadow-sm cursor-pointer flex-shrink-0"
             title="App Manual, Connection Guide & Legal / Privacy Hub (Info)"
             aria-label="App Manual, Connection Guide and Legal & Privacy Hub"
           >

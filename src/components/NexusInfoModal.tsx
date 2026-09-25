@@ -63,13 +63,13 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
           animate={{ scale: 1, y: 0, opacity: 1 }}
           exit={{ scale: 0.96, y: 12, opacity: 0 }}
           transition={{ type: "spring", damping: 28, stiffness: 350 }}
-          className="relative w-full max-w-2xl max-h-[88vh] flex flex-col bg-card border border-border/80 rounded-2xl shadow-2xl overflow-hidden text-text"
+          className="relative w-full max-w-2xl max-h-[88vh] flex flex-col bg-white dark:bg-[#121316] border border-zinc-200 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden text-text"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border/50 bg-surface/50 backdrop-blur flex-shrink-0">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-white/10 bg-zinc-50/90 dark:bg-surface/50 backdrop-blur flex-shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-500 flex items-center justify-center shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
                 <Info className="w-4 h-4" />
               </div>
               <div>
@@ -87,7 +87,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
 
             <button
               onClick={onClose}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-muted hover:text-text hover:bg-black/5 dark:hover:bg-white/10 transition-colors border border-border/60 cursor-pointer"
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-muted hover:text-text hover:bg-zinc-200/60 dark:hover:bg-white/10 transition-colors border border-zinc-200 dark:border-border/60 cursor-pointer"
               aria-label="Close dialog"
             >
               <X className="w-4 h-4" />
@@ -95,14 +95,14 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
           </div>
 
           {/* Simple Segmented Navigation */}
-          <div className="flex items-center gap-1.5 px-5 py-2.5 border-b border-border/40 bg-surface/30 flex-shrink-0">
+          <div className="flex items-center gap-1.5 px-5 py-2.5 border-b border-zinc-200 dark:border-border/40 bg-zinc-100/70 dark:bg-surface/30 flex-shrink-0">
             <button
               onClick={() => setActiveTab('guide')}
               className={cn(
                 "flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer",
                 activeTab === 'guide'
                   ? "bg-accent text-white shadow-sm"
-                  : "text-muted hover:text-text hover:bg-white/5"
+                  : "text-muted hover:text-text hover:bg-black/5 dark:hover:bg-white/5"
               )}
             >
               <Sparkles className="w-3.5 h-3.5" />
@@ -115,7 +115,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                 "flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer",
                 activeTab === 'features'
                   ? "bg-accent text-white shadow-sm"
-                  : "text-muted hover:text-text hover:bg-white/5"
+                  : "text-muted hover:text-text hover:bg-black/5 dark:hover:bg-white/5"
               )}
             >
               <Layers className="w-3.5 h-3.5" />
@@ -128,7 +128,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                 "flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer",
                 activeTab === 'privacy'
                   ? "bg-emerald-600 text-white shadow-sm"
-                  : "text-muted hover:text-text hover:bg-white/5"
+                  : "text-muted hover:text-text hover:bg-black/5 dark:hover:bg-white/5"
               )}
             >
               <ShieldCheck className="w-3.5 h-3.5" />
@@ -145,7 +145,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                 {/* 3 Step Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {/* Step 1 */}
-                  <div className="p-3.5 rounded-xl bg-surface border border-border/70 flex flex-col justify-between">
+                  <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 flex flex-col justify-between">
                     <div>
                       <div className="w-7 h-7 rounded-lg bg-accent text-white flex items-center justify-center text-xs font-bold mb-2.5 shadow-sm">
                         1
@@ -161,7 +161,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                   </div>
 
                   {/* Step 2 */}
-                  <div className="p-3.5 rounded-xl bg-surface border border-border/70 flex flex-col justify-between">
+                  <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 flex flex-col justify-between">
                     <div>
                       <div className="w-7 h-7 rounded-lg bg-accent text-white flex items-center justify-center text-xs font-bold mb-2.5 shadow-sm">
                         2
@@ -177,7 +177,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                   </div>
 
                   {/* Step 3 */}
-                  <div className="p-3.5 rounded-xl bg-surface border border-border/70 flex flex-col justify-between">
+                  <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 flex flex-col justify-between">
                     <div>
                       <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs font-bold mb-2.5 shadow-sm">
                         3
@@ -194,8 +194,8 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                 </div>
 
                 {/* Direct Disk Stream Feature */}
-                <div className="p-4 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-500 flex items-center justify-center shrink-0 mt-0.5">
+                <div className="p-4 rounded-xl bg-sky-50 dark:bg-sky-500/10 border border-sky-200 dark:border-sky-500/20 flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0 mt-0.5">
                     <HardDrive className="w-4 h-4" />
                   </div>
                   <div className="space-y-1">
@@ -207,8 +207,8 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                 </div>
 
                 {/* Offline Wi-Fi Highlight */}
-                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5">
+                <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
                     <Radio className="w-4 h-4" />
                   </div>
                   <div className="space-y-1">
@@ -224,7 +224,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
             {/* TAB 2: FEATURES */}
             {activeTab === 'features' && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="p-3.5 rounded-xl bg-surface border border-border/70 space-y-1.5">
+                <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs font-bold text-text">
                     <div className="w-7 h-7 rounded-lg bg-accent/15 text-accent flex items-center justify-center shrink-0">
                       <Send className="w-3.5 h-3.5" />
@@ -236,9 +236,9 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                   </p>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-surface border border-border/70 space-y-1.5">
+                <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs font-bold text-text">
-                    <div className="w-7 h-7 rounded-lg bg-sky-500/15 text-sky-500 flex items-center justify-center shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
                       <HardDrive className="w-3.5 h-3.5" />
                     </div>
                     <span>Direct Disk Streaming</span>
@@ -248,9 +248,9 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                   </p>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-surface border border-border/70 space-y-1.5">
+                <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs font-bold text-text">
-                    <div className="w-7 h-7 rounded-lg bg-purple-500/15 text-purple-500 flex items-center justify-center shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
                       <Video className="w-3.5 h-3.5" />
                     </div>
                     <span>Voice & Video Calls</span>
@@ -260,9 +260,9 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                   </p>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-surface border border-border/70 space-y-1.5">
+                <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs font-bold text-text">
-                    <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
                       <MessageSquare className="w-3.5 h-3.5" />
                     </div>
                     <span>Encrypted Mesh Chat</span>
@@ -272,9 +272,9 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                   </p>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-surface border border-border/70 space-y-1.5">
+                <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs font-bold text-text">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                       <Lock className="w-3.5 h-3.5" />
                     </div>
                     <span>Zero Servers & DTLS Encryption</span>
@@ -284,9 +284,9 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                   </p>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-surface border border-border/70 space-y-1.5">
+                <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs font-bold text-text">
-                    <div className="w-7 h-7 rounded-lg bg-rose-500/15 text-rose-500 flex items-center justify-center shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-rose-500/15 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
                       <Cpu className="w-3.5 h-3.5" />
                     </div>
                     <span>Local Storage Purge</span>
@@ -303,41 +303,41 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
               <div className="space-y-4">
                 {/* 4 Simple Guarantees */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="p-3.5 rounded-xl bg-surface border border-border/70 flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
                       <EyeOff className="w-3.5 h-3.5" />
                     </div>
-                    <div className="space-y-0.5">
+                    <div className="space-0.5">
                       <h4 className="text-xs font-bold text-text">No Tracking or Ads</h4>
                       <p className="text-[11px] text-muted">Zero analytics, zero tracking cookies, and zero fingerprinting.</p>
                     </div>
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-surface border border-border/70 flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
                       <ShieldCheck className="w-3.5 h-3.5" />
                     </div>
-                    <div className="space-y-0.5">
+                    <div className="space-0.5">
                       <h4 className="text-xs font-bold text-text">Zero Cloud Storage</h4>
                       <p className="text-[11px] text-muted">Files travel directly between devices and never touch a server.</p>
                     </div>
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-surface border border-border/70 flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
                       <Lock className="w-3.5 h-3.5" />
                     </div>
-                    <div className="space-y-0.5">
+                    <div className="space-0.5">
                       <h4 className="text-xs font-bold text-text">No Accounts Required</h4>
                       <p className="text-[11px] text-muted">No emails, passwords, or phone numbers needed to connect.</p>
                     </div>
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-surface border border-border/70 flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-surface border border-zinc-200/80 dark:border-border/70 flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                     </div>
-                    <div className="space-y-0.5">
+                    <div className="space-0.5">
                       <h4 className="text-xs font-bold text-text">100% Free & Open Source</h4>
                       <p className="text-[11px] text-muted">Licensed under MIT. Zero fees, subscriptions, or hidden paywalls.</p>
                     </div>
@@ -345,10 +345,10 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                 </div>
 
                 {/* Collapsible Full Legal Audit */}
-                <div className="pt-2 border-t border-border/40">
+                <div className="pt-2 border-t border-zinc-200 dark:border-border/40">
                   <button
                     onClick={() => setShowFullLegalAudit(prev => !prev)}
-                    className="w-full py-2.5 px-4 rounded-xl bg-surface hover:bg-white/5 border border-border/70 text-xs font-semibold text-text flex items-center justify-between transition-colors cursor-pointer"
+                    className="w-full py-2.5 px-4 rounded-xl bg-zinc-50 dark:bg-surface hover:bg-zinc-100 dark:hover:bg-white/5 border border-zinc-200/80 dark:border-border/70 text-xs font-semibold text-text flex items-center justify-between transition-colors cursor-pointer"
                   >
                     <span className="flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4 text-emerald-500" />
@@ -364,7 +364,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
                   </button>
 
                   {showFullLegalAudit && (
-                    <div className="mt-3 pt-3 border-t border-border/40">
+                    <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-border/40">
                       <LegalComplianceView />
                     </div>
                   )}
@@ -375,7 +375,7 @@ export const NexusInfoModal: React.FC<NexusInfoModalProps> = ({
           </div>
 
           {/* Clean Footer */}
-          <div className="flex items-center justify-between px-5 py-3 border-t border-border/50 bg-surface/50 text-[11px] text-muted flex-shrink-0">
+          <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-200 dark:border-border/50 bg-zinc-50/90 dark:bg-surface/50 text-[11px] text-muted flex-shrink-0">
             <span className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               Direct device-to-device • Zero servers

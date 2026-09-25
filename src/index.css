@@ -11,6 +11,7 @@
   --color-border: var(--color-border-val);
   --color-muted: var(--color-muted-val);
   --color-text: var(--color-text-val);
+  --color-card: var(--color-card-val);
   
   --font-sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -25,6 +26,7 @@
   --color-border-val: rgba(255, 255, 255, 0.5);
   --color-muted-val: #6e6e73;
   --color-text-val: #1d1d1f;
+  --color-card-val: #ffffff;
 
   --bg-color: #e0e7ff;
   --bg-grad-1: #fbc2eb;
@@ -42,6 +44,7 @@ html.dark {
   --color-border-val: rgba(0, 0, 0, 0.01);
   --color-muted-val: #94a3b8;
   --color-text-val: #e2e8f0;
+  --color-card-val: #121316;
 
   --bg-color: #050505;
   --bg-grad-1: #312e81;
