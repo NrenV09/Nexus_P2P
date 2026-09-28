@@ -67,7 +67,6 @@ import { EasterEggModal, playTapTick } from './components/EasterEggModal';
 import { NexusInfoModal } from './components/NexusInfoModal';
 import { DirectDownloadPromptModal } from './components/DirectDownloadPromptModal';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
-import { PWAInstallButton } from './components/PWAInstallButton';
 import { generateRandomName } from './lib/nameGenerator';
 import { createSafeDiskWriter, triggerBrowserFileDownload, purgeAllTempStorage } from './lib/diskStreamer';
 
@@ -2915,9 +2914,6 @@ export default function App() {
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
           )}
-
-          {/* PWA Offline Saving & Install Icon */}
-          <PWAInstallButton />
 
           {/* Info Button */}
           <button
