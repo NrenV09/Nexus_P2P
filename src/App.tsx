@@ -67,6 +67,7 @@ import { EasterEggModal, playTapTick } from './components/EasterEggModal';
 import { NexusInfoModal } from './components/NexusInfoModal';
 import { DirectDownloadPromptModal } from './components/DirectDownloadPromptModal';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { generateRandomName } from './lib/nameGenerator';
 import { createSafeDiskWriter, triggerBrowserFileDownload, purgeAllTempStorage } from './lib/diskStreamer';
 
@@ -1646,14 +1647,14 @@ export default function App() {
     };
   }, [addLog]);
 
-  const createPeer = useCallback((id: string) => {
+  const createPeer = useCallback((id: string, useStun: boolean = true) => {
     const pc = new RTCPeerConnection({
-      iceServers: [
+      iceServers: useStun ? [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-      ],
-      iceCandidatePoolSize: 2,
+      ] : [],
+      iceCandidatePoolSize: useStun ? 2 : 0,
     });
     peerConnections.current.set(id, pc);
     
@@ -1735,7 +1736,8 @@ export default function App() {
     setQrPayload("");
     setPasteBuffer("");
     
-    const pc = createPeer(id);
+    // QR code generation by host does not connect to STUN servers
+    const pc = createPeer(id, false);
     const dc = pc.createDataChannel('nexus-transfer');
     setupDataChannel(dc, id);
     
@@ -1805,7 +1807,8 @@ export default function App() {
       }
 
       const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
-      const pc = createPeer(id);
+      // Joiner does not connect to STUN servers in offline/airgapped or LAN scenarios
+      const pc = createPeer(id, false);
       
       await pc.setRemoteDescription(parsedSdp);
       const answer = await pc.createAnswer();
@@ -2912,6 +2915,9 @@ export default function App() {
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
           )}
+
+          {/* PWA Offline Saving & Install Icon */}
+          <PWAInstallButton />
 
           {/* Info Button */}
           <button

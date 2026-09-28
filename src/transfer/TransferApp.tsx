@@ -734,12 +734,12 @@ export default function App() {
     };
   }, [addLog]);
 
-  const createPeer = useCallback((id: string) => {
+  const createPeer = useCallback((id: string, useStun: boolean = true) => {
     const pc = new RTCPeerConnection({
-      iceServers: [
+      iceServers: useStun ? [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
-      ],
+      ] : [],
       iceCandidatePoolSize: 0,
     });
     peerConnections.current.set(id, pc);
@@ -816,7 +816,8 @@ export default function App() {
     setQrPayload("");
     setPasteBuffer("");
     
-    const pc = createPeer(id);
+    // QR code generation by host does not connect to STUN servers
+    const pc = createPeer(id, false);
     const dc = pc.createDataChannel('nexus-transfer');
     setupDataChannel(dc, id);
     
@@ -873,7 +874,8 @@ export default function App() {
       }
 
       const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
-      const pc = createPeer(id);
+      // Joiner does not connect to STUN servers in offline/airgapped or LAN scenarios
+      const pc = createPeer(id, false);
       
       await pc.setRemoteDescription(parsedSdp);
       const answer = await pc.createAnswer();
