@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Download, X, GripHorizontal, RefreshCw, Share, Link as LinkIcon, Check, Copy, FileText, Play, Volume2 } from 'lucide-react';
+import { Download, X, GripHorizontal, RefreshCw, Share, Link as LinkIcon, Check, Copy, FileText, Play, Pause, Volume2, Film } from 'lucide-react';
 import { formatBytes } from '../lib/utils';
 import { FilePayload } from '../types';
-import { getOrStoreCache } from '../lib/cacheStorage';
+import { getOrStoreCache, getCachedBlob } from '../lib/cacheStorage';
 
 interface FilePreviewProps {
   file: FilePayload | null;
@@ -392,5 +392,128 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
         )}
       </div>
     </motion.div>
+  );
+};
+
+export interface VideoDropZonePreviewProps {
+  file: FilePayload;
+  className?: string;
+}
+
+export const VideoDropZonePreview: React.FC<VideoDropZonePreviewProps> = ({ file, className = '' }) => {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState<number | null>(null);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let createdUrl: string | null = null;
+
+    const loadVideo = async () => {
+      try {
+        if (file.blob) {
+          createdUrl = URL.createObjectURL(file.blob);
+          if (active) setVideoUrl(createdUrl);
+          return;
+        }
+
+        if (file.cacheUrl) {
+          const cachedBlob = await getCachedBlob(file.cacheUrl);
+          if (cachedBlob && active) {
+            createdUrl = URL.createObjectURL(cachedBlob);
+            setVideoUrl(createdUrl);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load video drop zone preview:", err);
+        if (active) setHasError(true);
+      }
+    };
+
+    loadVideo();
+
+    return () => {
+      active = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [file.blob, file.cacheUrl]);
+
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    if (vid.paused) {
+      vid.play()
+        .then(() => setIsPlaying(true))
+        .catch(err => console.warn("Video preview play error:", err));
+    } else {
+      vid.pause();
+      setIsPlaying(false);
+    }
+  };
+
+  const formatDuration = (secs: number) => {
+    if (!isFinite(secs) || isNaN(secs) || secs < 0) return null;
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  if (hasError || !videoUrl) {
+    return (
+      <div 
+        className={`w-14 h-14 sm:w-16 sm:h-14 rounded-xl bg-purple-500/10 border border-purple-500/25 text-purple-400 flex flex-col items-center justify-center shrink-0 shadow-sm transition-colors hover:bg-purple-500/15 ${className}`}
+        title="Video File"
+      >
+        <Film className="w-5 h-5 mb-0.5 opacity-80" />
+        <span className="text-[8px] font-mono font-bold tracking-tight uppercase">Video</span>
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className={`relative w-14 h-14 sm:w-16 sm:h-14 rounded-xl overflow-hidden bg-black/90 border border-black/20 dark:border-white/15 shadow-sm group shrink-0 cursor-pointer ${className}`}
+      onClick={togglePlay}
+      title={isPlaying ? "Click to Pause" : "Click to Play Preview"}
+    >
+      <video
+        ref={videoRef}
+        src={videoUrl}
+        preload="metadata"
+        playsInline
+        muted
+        className="w-full h-full object-cover"
+        onLoadedMetadata={() => {
+          if (videoRef.current && isFinite(videoRef.current.duration)) {
+            setDuration(videoRef.current.duration);
+          }
+        }}
+        onEnded={() => setIsPlaying(false)}
+        onError={() => setHasError(true)}
+      />
+
+      {/* Play/Pause Overlay */}
+      <div className={`absolute inset-0 bg-black/35 flex items-center justify-center transition-opacity ${isPlaying ? 'opacity-0 hover:opacity-100' : 'opacity-100'}`}>
+        <div className="w-6 h-6 rounded-full bg-white/90 dark:bg-zinc-900/90 text-zinc-900 dark:text-white flex items-center justify-center shadow-md transition-transform group-hover:scale-110">
+          {isPlaying ? (
+            <Pause className="w-2.5 h-2.5 fill-current" />
+          ) : (
+            <Play className="w-2.5 h-2.5 fill-current ml-0.5" />
+          )}
+        </div>
+      </div>
+
+      {/* Video Duration / Tag Badge */}
+      <div className="absolute bottom-0.5 right-1 px-1 py-0.2 rounded bg-black/75 backdrop-blur-xs text-[7px] font-mono font-bold text-white/90 flex items-center gap-0.5 pointer-events-none">
+        {duration ? formatDuration(duration) : 'VID'}
+      </div>
+    </div>
   );
 };

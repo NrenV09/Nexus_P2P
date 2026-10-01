@@ -53,7 +53,7 @@ import { QRScanner } from './components/QRScanner';
 import { QRUtilityNode } from './components/QRUtilityNode';
 import { SecureChatNode } from './components/SecureChatNode';
 import { Base64ToolNode } from './components/Base64ToolNode';
-import { FilePreview } from './components/FilePreview';
+import { FilePreview, VideoDropZonePreview } from './components/FilePreview';
 import { NetworkBackground } from './components/NetworkBackground';
 import { DataStream } from './components/DataStream';
 import { PacketTransferAnimation } from './components/PacketTransferAnimation';
@@ -67,7 +67,6 @@ import { EasterEggModal, playTapTick } from './components/EasterEggModal';
 import { NexusInfoModal } from './components/NexusInfoModal';
 import { DirectDownloadPromptModal } from './components/DirectDownloadPromptModal';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
-import { VideoDropZonePreview } from './components/VideoDropZonePreview';
 import { generateRandomName } from './lib/nameGenerator';
 import { createSafeDiskWriter, triggerBrowserFileDownload, purgeAllTempStorage, isIOSorIPad } from './lib/diskStreamer';
 
@@ -3644,18 +3643,17 @@ export default function App() {
                                 }
                               }}
                               className={cn(
-                                "bg-white/40 dark:bg-transparent border p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all shadow-sm group",
+                                "bg-white/40 dark:bg-transparent border p-3 sm:p-4 rounded-2xl flex items-center justify-between gap-3 transition-all shadow-sm group",
                                 "cursor-pointer hover:bg-white/60 dark:hover:bg-white/5 hover:shadow-md border-white/60 dark:border-white/10"
                               )}
                             >
-                              <div className="flex items-center gap-3.5 min-w-0 flex-1 w-full sm:w-auto">
+                              {/* Left: Thumbnail / File Icon */}
+                              <div className="shrink-0" onClick={(e) => { if (isVideo) e.stopPropagation(); }}>
                                 {isVideo ? (
-                                  <div onClick={(e) => e.stopPropagation()} className="shrink-0">
-                                    <VideoDropZonePreview file={file} />
-                                  </div>
+                                  <VideoDropZonePreview file={file} />
                                 ) : (
                                   <div className={cn(
-                                    "w-10 h-10 rounded-xl flex items-center justify-center shadow-sm shrink-0 border",
+                                    "w-12 h-12 rounded-xl flex items-center justify-center shadow-sm shrink-0 border",
                                     isPdf 
                                       ? "bg-red-500/10 border-red-500/20 text-red-500"
                                       : isHtml
@@ -3664,9 +3662,9 @@ export default function App() {
                                     !isPdf && !isHtml && (file.direction === 'in' ? "text-success" : "text-accent")
                                   )}>
                                     {isPdf ? (
-                                      <span className="text-lg">📄</span>
+                                      <span className="text-xl">📄</span>
                                     ) : isHtml ? (
-                                      <span className="text-lg">🌐</span>
+                                      <span className="text-xl">🌐</span>
                                     ) : file.direction === 'in' ? (
                                       <Download className="w-5 h-5" />
                                     ) : (
@@ -3674,40 +3672,42 @@ export default function App() {
                                     )}
                                   </div>
                                 )}
+                              </div>
 
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-sm font-semibold truncate text-text flex items-center gap-2 flex-wrap">
-                                    <span className="truncate">{file.name}</span>
-                                    {isPdf && (
-                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-red-500/15 text-red-500 border border-red-500/30">
-                                        PDF • Preview Disabled
-                                      </span>
-                                    )}
-                                    {isHtml && (
-                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30">
-                                        HTML • Preview Disabled
-                                      </span>
-                                    )}
-                                    {isVideo && (
-                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30">
-                                        Video Preview
-                                      </span>
-                                    )}
-                                    {file.cacheUrl && !isPdf && !isHtml && !isVideo && (
-                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">
+                              {/* Center: File Title & Meta */}
+                              <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-sm font-semibold truncate text-text" title={file.name}>
+                                    {file.name}
+                                  </span>
+                                  {isPdf && (
+                                    <span className="shrink-0 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-red-500/15 text-red-500 border border-red-500/30">
+                                      PDF • No Preview
+                                    </span>
+                                  )}
+                                  {isHtml && (
+                                    <span className="shrink-0 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                                      HTML • No Preview
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted mt-1 flex items-center gap-1.5 text-nowrap truncate">
+                                  <span className="shrink-0 font-medium text-text/80">{formatBytes(file.size)}</span>
+                                  <span className="opacity-40">•</span>
+                                  <span className="truncate">{file.direction === 'in' ? `From: ${file.senderName}` : "Sent by you"}</span>
+                                  {file.cacheUrl && !isPdf && !isHtml && !isVideo && (
+                                    <>
+                                      <span className="opacity-40">•</span>
+                                      <span className="shrink-0 text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-accent/10 text-accent border border-accent/20">
                                         Cached
                                       </span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-muted mt-0.5 flex items-center gap-2">
-                                    <span>{formatBytes(file.size)}</span>
-                                    <span>•</span>
-                                    <span>{file.direction === 'in' ? `From: ${file.senderName}` : "Sent by you"}</span>
-                                  </div>
+                                    </>
+                                  )}
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-1 shrink-0 self-end sm:self-center" onClick={(e) => e.stopPropagation()}>
+                              {/* Right: Actions */}
+                              <div className="flex items-center gap-0.5 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   type="button"
                                   onClick={async (e) => {
@@ -3737,7 +3737,7 @@ export default function App() {
                                 <button
                                   type="button"
                                   onClick={(e) => handleDeleteSandboxFile(file, e)}
-                                  className="p-2 rounded-xl text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-60 group-hover:opacity-100 cursor-pointer shrink-0"
+                                  className="p-2 rounded-xl text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-60 group-hover:opacity-100 cursor-pointer"
                                   title="Delete cached file from disk"
                                 >
                                   <Trash2 className="w-4 h-4" />

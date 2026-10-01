@@ -35,7 +35,7 @@ import {
 } from '../types';
 
 import { SecureChatNode } from '../components/SecureChatNode';
-import { FilePreview } from '../components/FilePreview';
+import { FilePreview, VideoDropZonePreview } from '../components/FilePreview';
 import { NetworkBackground } from '../components/NetworkBackground';
 import { DataStream } from '../components/DataStream';
 import { PacketTransferAnimation } from '../components/PacketTransferAnimation';
@@ -45,7 +45,6 @@ import { NexusNetworkMap } from '../components/NexusNetworkMap';
 import { NexusContainer } from '../nexus';
 import { generateRandomName } from '../lib/nameGenerator';
 import { purgeAllTempStorage, triggerBrowserFileDownload } from '../lib/diskStreamer';
-import { VideoDropZonePreview } from '../components/VideoDropZonePreview';
 
 const CHUNK_SIZE = 64000; // WebRTC safe chunk size (below 64KB SCTP limit for Firefox, Safari & iOS)
 const MAX_BUFFERED_AMOUNT = 512 * 1024; // 512KB safe flow control threshold to prevent SCTP buffer overflows
@@ -1613,18 +1612,17 @@ export default function App() {
                               key={file.id}
                               onClick={() => file.blob ? setSelectedFile(file) : null}
                               className={cn(
-                                "bg-white/40 dark:bg-transparent border p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all shadow-sm",
+                                "bg-white/40 dark:bg-transparent border p-3 sm:p-4 rounded-2xl flex items-center justify-between gap-3 transition-all shadow-sm",
                                 file.blob ? "cursor-pointer hover:bg-white/60 dark:hover:bg-black/5 hover:shadow-md border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent " : "border-white/30 dark:border-transparent dark:border-white/10 dark:border-transparent opacity-70"
                               )}
                             >
-                              <div className="flex items-center gap-3.5 min-w-0 flex-1 w-full sm:w-auto">
+                              {/* Left: Thumbnail / File Icon */}
+                              <div className="shrink-0" onClick={(e) => { if (isVideo) e.stopPropagation(); }}>
                                 {isVideo ? (
-                                  <div onClick={(e) => e.stopPropagation()} className="shrink-0">
-                                    <VideoDropZonePreview file={file} />
-                                  </div>
+                                  <VideoDropZonePreview file={file} />
                                 ) : (
                                   <div className={cn(
-                                    "w-10 h-10 rounded-xl flex items-center justify-center shadow-sm shrink-0 border",
+                                    "w-12 h-12 rounded-xl flex items-center justify-center shadow-sm shrink-0 border",
                                     isPdf 
                                       ? "bg-red-500/10 border-red-500/20 text-red-500"
                                       : isHtml
@@ -1633,9 +1631,9 @@ export default function App() {
                                     !isPdf && !isHtml && (file.direction === 'in' ? "text-success" : "text-accent")
                                   )}>
                                     {isPdf ? (
-                                      <span className="text-lg">📄</span>
+                                      <span className="text-xl">📄</span>
                                     ) : isHtml ? (
-                                      <span className="text-lg">🌐</span>
+                                      <span className="text-xl">🌐</span>
                                     ) : file.direction === 'in' ? (
                                       <Download className="w-5 h-5" />
                                     ) : (
@@ -1643,33 +1641,35 @@ export default function App() {
                                     )}
                                   </div>
                                 )}
-                                <div className="flex-1 min-w-0 transition-colors">
-                                  <div className="text-sm font-semibold truncate flex items-center gap-2 flex-wrap">
-                                    <span className="truncate">{file.name}</span>
-                                    {isPdf && (
-                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-red-500/15 text-red-500 border border-red-500/30">
-                                        PDF • Preview Disabled
-                                      </span>
-                                    )}
-                                    {isHtml && (
-                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30">
-                                        HTML • Preview Disabled
-                                      </span>
-                                    )}
-                                    {isVideo && (
-                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30">
-                                        Video Preview
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-muted mt-0.5">
-                                    {formatBytes(file.size)} • {file.direction === 'in' ? `From: ${file.senderName}` : "Sent by you"}
-                                  </div>
+                              </div>
+
+                              {/* Center: File Title & Meta */}
+                              <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-sm font-semibold truncate text-text" title={file.name}>
+                                    {file.name}
+                                  </span>
+                                  {isPdf && (
+                                    <span className="shrink-0 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-red-500/15 text-red-500 border border-red-500/30">
+                                      PDF • No Preview
+                                    </span>
+                                  )}
+                                  {isHtml && (
+                                    <span className="shrink-0 text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                                      HTML • No Preview
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted mt-1 flex items-center gap-1.5 text-nowrap truncate">
+                                  <span className="shrink-0 font-medium text-text/80">{formatBytes(file.size)}</span>
+                                  <span className="opacity-40">•</span>
+                                  <span className="truncate">{file.direction === 'in' ? `From: ${file.senderName}` : "Sent by you"}</span>
                                 </div>
                               </div>
 
+                              {/* Right: Actions */}
                               {file.blob && (
-                                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center gap-0.5 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
                                     onClick={(e) => {
