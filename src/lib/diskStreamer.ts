@@ -320,19 +320,85 @@ export async function createSafeDiskWriter(
 import { purgeFailedTransferCache } from './cacheStorage';
 
 /**
- * Triggers safe browser file download from Blob/File
+ * Detects iOS and iPadOS devices including iPad (iPad 9th gen & below, modern iPadOS, iPhones)
+ * where programmatic a.click() on blob URLs without user gesture triggers fatal
+ * WebContent process Jetsam crashes.
+ */
+export function isIOSorIPad(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const platform = (navigator as any).platform || '';
+  const vendor = navigator.vendor || '';
+
+  // 1. Classic iOS User Agent string (iPhone, iPod, iPad)
+  if (/iPad|iPhone|iPod/i.test(ua)) return true;
+
+  // 2. Explicit platform reporting
+  if (/iPad|iPhone|iPod/i.test(platform)) return true;
+
+  // 3. iPadOS 13+ desktop mode (reports as MacIntel or Macintosh, but has touch hardware)
+  if (platform === 'MacIntel' || platform === 'Macintosh' || /Macintosh/i.test(ua)) {
+    // Touch points: iPad always has touch support
+    if (navigator.maxTouchPoints > 0) return true;
+    // Touch events in window or document
+    if ('ontouchstart' in window || ('TouchEvent' in window)) return true;
+    // Screen aspect ratio check: iPads (including 9th gen 1080x810 / 1024x768) are 4:3 (~1.33:1 or ~1.43:1)
+    // MacBooks are 16:10 (1.6:1) or 16:9 (1.77:1)
+    if (typeof screen !== 'undefined') {
+      const maxDim = Math.max(screen.width, screen.height);
+      const minDim = Math.min(screen.width, screen.height);
+      const ratio = maxDim / minDim;
+      if (ratio < 1.55) return true;
+    }
+  }
+
+  // 4. Apple WebKit browser with touch capabilities
+  if (/Apple/i.test(vendor) && (navigator.maxTouchPoints > 0 || 'ontouchstart' in window || ('TouchEvent' in window))) {
+    return true;
+  }
+
+  // 5. iOS standalone PWA mode
+  if ((navigator as any).standalone !== undefined) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Triggers safe browser file download from Blob/File.
+ * On iPad 9th gen and below (and iOS Safari), unprompted programmatic a.click() on blob URLs
+ * is blocked by WebKit security policies and causes the tab to terminate due to out-of-process memory limits.
+ * We dispatch a custom event on iOS to allow a safe 1-tap user-gesture save instead.
  */
 export function triggerBrowserFileDownload(fileOrBlob: Blob | File, fileName: string): void {
-  const url = URL.createObjectURL(fileOrBlob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, 60000);
+  if (isIOSorIPad()) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('nexus-ios-download-ready', {
+        detail: { blob: fileOrBlob, name: fileName }
+      }));
+    }
+    return;
+  }
+
+  try {
+    const url = URL.createObjectURL(fileOrBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.rel = 'noopener noreferrer';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      if (document.body.contains(a)) {
+        document.body.removeChild(a);
+      }
+      URL.revokeObjectURL(url);
+    }, 20000);
+  } catch (err) {
+    console.warn("Browser download trigger failed:", err);
+  }
 }
 
 /**

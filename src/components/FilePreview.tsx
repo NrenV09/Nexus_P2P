@@ -28,7 +28,10 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
     if (file) {
       const mime = file.mimeType || file.blob?.type || '';
       const name = file.name.toLowerCase();
-      const isText = mime.startsWith('text/') ||
+      const isPdf = mime === 'application/pdf' || name.endsWith('.pdf');
+      const isHtml = mime === 'text/html' || name.endsWith('.html') || name.endsWith('.htm');
+      
+      const isText = !isPdf && !isHtml && (mime.startsWith('text/') ||
         mime.includes('json') ||
         name.endsWith('.txt') ||
         name.endsWith('.json') ||
@@ -36,7 +39,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
         name.endsWith('.log') ||
         name.endsWith('.csv') ||
         name.endsWith('.js') ||
-        name.endsWith('.ts');
+        name.endsWith('.ts'));
 
       if (isText && file.blob) {
         setIsLoadingText(true);
@@ -119,8 +122,11 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
 
   if (!file) return null;
 
-  const mime = file.mimeType || file.blob?.type || '';
-  const isImage = mime.startsWith('image/') || file.name.match(/\.(png|jpe?g|gif|svg|webp|bmp)$/i);
+  const mime = (file.mimeType || file.blob?.type || '').toLowerCase();
+  const name = file.name.toLowerCase();
+  const isPdf = mime === 'application/pdf' || name.endsWith('.pdf');
+  const isHtml = mime === 'text/html' || name.endsWith('.html') || name.endsWith('.htm');
+  const isImage = !isPdf && !isHtml && (mime.startsWith('image/') || file.name.match(/\.(png|jpe?g|gif|svg|webp|bmp)$/i));
   const isVideo = mime.startsWith('video/') || file.name.match(/\.(mp4|webm|mov|mkv)$/i);
   const isAudio = mime.startsWith('audio/') || file.name.match(/\.(mp3|wav|ogg|m4a)$/i);
 
@@ -252,8 +258,52 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ file, onClose }) => {
               <GripHorizontal className="w-3 h-3" /> Draggable Asset
             </div>
 
-            {/* 1. Image Preview */}
-            {isImage && url ? (
+            {/* 0. PDF & HTML Explicitly Disabled Preview */}
+            {isPdf ? (
+              <div className="text-center flex flex-col items-center p-6 md:p-10 bg-surface border border-red-500/20 rounded-2xl shadow-2xl w-full max-w-lg">
+                <div className="w-20 h-20 md:w-24 md:h-24 mb-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-500 flex items-center justify-center text-4xl md:text-5xl shadow-inner">
+                  📄
+                </div>
+                <h3 className="text-lg md:text-xl font-bold text-text mb-1 break-all max-w-full">{file.name}</h3>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-red-500/15 text-red-500 border border-red-500/30 mb-3">
+                  PDF Document • Preview Disabled
+                </span>
+                <p className="text-xs text-muted max-w-sm mb-5 leading-relaxed">
+                  Document previews for PDF files are disabled to safeguard system stability and memory limits. Download to view directly in your system PDF reader.
+                </p>
+                {url && (
+                  <a
+                    href={url}
+                    download={file.name}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs shadow-md hover:bg-accent/90 transition-all cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" /> Download PDF ({formatBytes(file.size)})
+                  </a>
+                )}
+              </div>
+            ) : isHtml ? (
+              <div className="text-center flex flex-col items-center p-6 md:p-10 bg-surface border border-amber-500/20 rounded-2xl shadow-2xl w-full max-w-lg">
+                <div className="w-20 h-20 md:w-24 md:h-24 mb-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-500 flex items-center justify-center text-4xl md:text-5xl shadow-inner">
+                  🌐
+                </div>
+                <h3 className="text-lg md:text-xl font-bold text-text mb-1 break-all max-w-full">{file.name}</h3>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30 mb-3">
+                  HTML Document • Preview Disabled
+                </span>
+                <p className="text-xs text-muted max-w-sm mb-5 leading-relaxed">
+                  Document previews for HTML files are disabled to prevent script execution and preserve tab stability. Download to inspect or view safely.
+                </p>
+                {url && (
+                  <a
+                    href={url}
+                    download={file.name}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent text-white font-semibold text-xs shadow-md hover:bg-accent/90 transition-all cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" /> Download HTML ({formatBytes(file.size)})
+                  </a>
+                )}
+              </div>
+            ) : isImage && url ? (
               <a 
                 href={url} 
                 download={file.name} 

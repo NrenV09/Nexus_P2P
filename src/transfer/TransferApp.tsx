@@ -44,7 +44,8 @@ import { ViewProfileModal } from '../components/ViewProfileModal';
 import { NexusNetworkMap } from '../components/NexusNetworkMap';
 import { NexusContainer } from '../nexus';
 import { generateRandomName } from '../lib/nameGenerator';
-import { purgeAllTempStorage } from '../lib/diskStreamer';
+import { purgeAllTempStorage, triggerBrowserFileDownload } from '../lib/diskStreamer';
+import { VideoDropZonePreview } from '../components/VideoDropZonePreview';
 
 const CHUNK_SIZE = 64000; // WebRTC safe chunk size (below 64KB SCTP limit for Firefox, Safari & iOS)
 const MAX_BUFFERED_AMOUNT = 512 * 1024; // 512KB safe flow control threshold to prevent SCTP buffer overflows
@@ -245,6 +246,26 @@ export default function App() {
     setAutoDownloadState(val);
     autoDownloadRef.current = val;
   };
+
+  const [iosDownloadPrompt, setIosDownloadPrompt] = useState<{ blob: Blob | File; name: string; url: string } | null>(null);
+
+  useEffect(() => {
+    const handleIosDownload = (e: any) => {
+      if (!e.detail || !e.detail.blob) return;
+      const url = URL.createObjectURL(e.detail.blob);
+      setIosDownloadPrompt({
+        blob: e.detail.blob,
+        name: e.detail.name,
+        url
+      });
+      addLog(`File received: ${e.detail.name}. On iPadOS Safari, tap to save to Files.`, "ok");
+    };
+
+    window.addEventListener('nexus-ios-download-ready' as any, handleIosDownload);
+    return () => {
+      window.removeEventListener('nexus-ios-download-ready' as any, handleIosDownload);
+    };
+  }, [addLog]);
 
   const triggerTransferAnimation = useCallback(() => {
     setIsTransferring(true);
@@ -722,14 +743,7 @@ export default function App() {
       addLog(`Payload received: ${name}`, "ok");
 
       if (autoDownloadRef.current) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        triggerBrowserFileDownload(blob, name);
       }
     };
   }, [addLog]);
@@ -1587,32 +1601,102 @@ export default function App() {
                           <PacketTransferAnimation transfer={transfer} myUsername={profile.username} onCancel={handleCancelTransfer} />
                         )}
 
-                        {files.map((file, idx) => (
-                          <div 
-                            key={file.id}
-                            onClick={() => file.blob ? setSelectedFile(file) : null}
-                            className={cn(
-                              "bg-white/40 dark:bg-transparent border p-4 rounded-2xl flex items-center gap-4 transition-all shadow-sm",
-                              file.blob ? "cursor-pointer hover:bg-white/60 dark:hover:bg-black/5 hover:shadow-md border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent " : "border-white/30 dark:border-transparent dark:border-white/10 dark:border-transparent opacity-70"
-                            )}
-                          >
-                            <div className={cn(
-                              "w-10 h-10 rounded-xl bg-white dark:bg-transparent flex items-center justify-center shadow-sm shrink-0",
-                              file.direction === 'in' ? "text-success" : "text-accent"
-                            )}>
-                              {file.direction === 'in' ? <Download className="w-5 h-5" /> : <Send className="w-5 h-5" />}
-                            </div>
-                            <div className={cn(
-                              "flex-1 min-w-0 transition-colors",
-                              file.direction === 'in' ? "text-text" : "text-text"
-                            )}>
-                              <div className="text-sm font-semibold truncate">{file.name}</div>
-                              <div className="text-xs text-muted mt-0.5">
-                                {formatBytes(file.size)} • {file.direction === 'in' ? `From: ${file.senderName}` : "Sent by you"}
+                        {files.map((file, idx) => {
+                          const mime = (file.mimeType || file.blob?.type || '').toLowerCase();
+                          const name = file.name.toLowerCase();
+                          const isPdf = mime === 'application/pdf' || name.endsWith('.pdf');
+                          const isHtml = mime === 'text/html' || name.endsWith('.html') || name.endsWith('.htm');
+                          const isVideo = mime.startsWith('video/') || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|ogv)$/i);
+
+                          return (
+                            <div 
+                              key={file.id}
+                              onClick={() => file.blob ? setSelectedFile(file) : null}
+                              className={cn(
+                                "bg-white/40 dark:bg-transparent border p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all shadow-sm",
+                                file.blob ? "cursor-pointer hover:bg-white/60 dark:hover:bg-black/5 hover:shadow-md border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent " : "border-white/30 dark:border-transparent dark:border-white/10 dark:border-transparent opacity-70"
+                              )}
+                            >
+                              <div className="flex items-center gap-3.5 min-w-0 flex-1 w-full sm:w-auto">
+                                {isVideo ? (
+                                  <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                                    <VideoDropZonePreview file={file} />
+                                  </div>
+                                ) : (
+                                  <div className={cn(
+                                    "w-10 h-10 rounded-xl flex items-center justify-center shadow-sm shrink-0 border",
+                                    isPdf 
+                                      ? "bg-red-500/10 border-red-500/20 text-red-500"
+                                      : isHtml
+                                      ? "bg-amber-500/10 border-amber-500/20 text-amber-500"
+                                      : "bg-white dark:bg-transparent border-black/5 dark:border-white/5",
+                                    !isPdf && !isHtml && (file.direction === 'in' ? "text-success" : "text-accent")
+                                  )}>
+                                    {isPdf ? (
+                                      <span className="text-lg">📄</span>
+                                    ) : isHtml ? (
+                                      <span className="text-lg">🌐</span>
+                                    ) : file.direction === 'in' ? (
+                                      <Download className="w-5 h-5" />
+                                    ) : (
+                                      <Send className="w-5 h-5" />
+                                    )}
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0 transition-colors">
+                                  <div className="text-sm font-semibold truncate flex items-center gap-2 flex-wrap">
+                                    <span className="truncate">{file.name}</span>
+                                    {isPdf && (
+                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-red-500/15 text-red-500 border border-red-500/30">
+                                        PDF • Preview Disabled
+                                      </span>
+                                    )}
+                                    {isHtml && (
+                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                                        HTML • Preview Disabled
+                                      </span>
+                                    )}
+                                    {isVideo && (
+                                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30">
+                                        Video Preview
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-muted mt-0.5">
+                                    {formatBytes(file.size)} • {file.direction === 'in' ? `From: ${file.senderName}` : "Sent by you"}
+                                  </div>
+                                </div>
                               </div>
+
+                              {file.blob && (
+                                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (file.blob) {
+                                        const u = URL.createObjectURL(file.blob);
+                                        const a = document.createElement('a');
+                                        a.href = u;
+                                        a.download = file.name;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        setTimeout(() => {
+                                          document.body.removeChild(a);
+                                          URL.revokeObjectURL(u);
+                                        }, 5000);
+                                      }
+                                    }}
+                                    className="p-2 rounded-xl text-muted hover:text-accent hover:bg-accent/10 transition-colors cursor-pointer"
+                                    title="Download file"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
 
                         {files.length === 0 && !transfer && (
                           <div className="h-full flex flex-col items-center justify-center opacity-40 py-12">
@@ -1781,6 +1865,50 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Safe iPadOS / iOS 1-Tap Download Prompt */}
+      {iosDownloadPrompt && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-[calc(100vw-3rem)] p-4 rounded-2xl bg-surface/95 border border-accent/40 shadow-2xl backdrop-blur-xl flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-text font-bold text-sm">
+              <span className="w-2.5 h-2.5 rounded-full bg-success animate-pulse" />
+              <span>Transfer Complete</span>
+            </div>
+            <button 
+              type="button"
+              onClick={() => {
+                URL.revokeObjectURL(iosDownloadPrompt.url);
+                setIosDownloadPrompt(null);
+              }}
+              className="p-1 rounded-lg text-muted hover:text-text cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="text-xs text-text font-medium truncate">
+            {iosDownloadPrompt.name}
+          </div>
+          <p className="text-[11px] text-muted">
+            Safari on iPadOS requires a 1-tap gesture to save files directly to iPad Files.
+          </p>
+          <a
+            href={iosDownloadPrompt.url}
+            download={iosDownloadPrompt.name}
+            onClick={() => {
+              setTimeout(() => {
+                if (iosDownloadPrompt) {
+                  URL.revokeObjectURL(iosDownloadPrompt.url);
+                  setIosDownloadPrompt(null);
+                }
+              }, 1500);
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-accent text-white font-semibold text-xs shadow-md hover:bg-accent/90 transition-all cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Save to iPad Files ({formatBytes(iosDownloadPrompt.blob.size)})</span>
+          </a>
+        </div>
+      )}
     </div>
   );
 }
