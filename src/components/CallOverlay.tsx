@@ -603,20 +603,25 @@ export function CallOverlay({
   // Participant names resolver
   const resolveParticipantName = (id: string) => {
     if (id === 'local') return 'You';
-    return getPeerName?.(id) || peerProfiles?.[id]?.username || 'Remote Node';
+    const cleanId = id.replace(/^mesh_/, '');
+    return getPeerName?.(id) || peerProfiles?.[id]?.username || peerProfiles?.[cleanId]?.username || 'Remote Node';
   };
 
   const resolveParticipantAvatar = (id: string): string | undefined => {
     if (id === 'local') return localProfile?.avatarImage;
+    const cleanId = id.replace(/^mesh_/, '');
     if (peerProfiles?.[id]?.avatarImage) return peerProfiles[id].avatarImage;
-    const matched = Object.values(peerProfiles || {}).find(p => p.id === id);
+    if (peerProfiles?.[cleanId]?.avatarImage) return peerProfiles[cleanId].avatarImage;
+    const matched = Object.values(peerProfiles || {}).find(p => p.id === id || p.id === cleanId);
     return matched?.avatarImage;
   };
 
   const resolveParticipantColor = (id: string): string | undefined => {
     if (id === 'local') return localProfile?.avatarColor;
+    const cleanId = id.replace(/^mesh_/, '');
     if (peerProfiles?.[id]?.avatarColor) return peerProfiles[id].avatarColor;
-    const matched = Object.values(peerProfiles || {}).find(p => p.id === id);
+    if (peerProfiles?.[cleanId]?.avatarColor) return peerProfiles[cleanId].avatarColor;
+    const matched = Object.values(peerProfiles || {}).find(p => p.id === id || p.id === cleanId);
     return matched?.avatarColor;
   };
 

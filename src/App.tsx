@@ -286,6 +286,32 @@ export default function App() {
   const fileBuffers = useRef<Map<string, any>>(new Map());
   const lastUpdateRef = useRef<number>(Date.now());
   const createHostOfferRef = useRef<(() => Promise<void>) | null>(null);
+  const createPeerRef = useRef<((id: string, useStun?: boolean) => RTCPeerConnection) | null>(null);
+  const waitForIceRef = useRef<((pc: RTCPeerConnection) => Promise<void>) | null>(null);
+
+  const getDcForPeer = useCallback((targetId?: string): RTCDataChannel | undefined => {
+    if (!targetId) return undefined;
+    if (dataChannels.current.has(targetId)) return dataChannels.current.get(targetId);
+    if (dataChannels.current.has(`mesh_${targetId}`)) return dataChannels.current.get(`mesh_${targetId}`);
+    for (const [cId, profId] of peerIdToProfileId.current.entries()) {
+      if (profId === targetId || profId === targetId.replace(/^mesh_/, '')) {
+        return dataChannels.current.get(cId);
+      }
+    }
+    return undefined;
+  }, []);
+
+  const getPcForPeer = useCallback((targetId?: string): RTCPeerConnection | undefined => {
+    if (!targetId) return undefined;
+    if (peerConnections.current.has(targetId)) return peerConnections.current.get(targetId);
+    if (peerConnections.current.has(`mesh_${targetId}`)) return peerConnections.current.get(`mesh_${targetId}`);
+    for (const [cId, profId] of peerIdToProfileId.current.entries()) {
+      if (profId === targetId || profId === targetId.replace(/^mesh_/, '')) {
+        return peerConnections.current.get(cId);
+      }
+    }
+    return undefined;
+  }, []);
 
   const transferRef = useRef<TransferProgress | null>(null);
   useEffect(() => {
@@ -998,23 +1024,56 @@ export default function App() {
       });
       peerConnections.current.delete(peerId);
 
-      // Automated Heir Succession: If joiner and host tunnel terminates abruptly, promote to host!
-      if (roleRef.current === 'join') {
-        addLog("⚠️ Nexus Failover: Host node disappeared abruptly. Activating automated heir succession...", "info");
-        setRole('host');
-        roleRef.current = 'host';
-        setQrPayload("");
-        setPasteBuffer("");
-        addLog("👑 Nexus Failover: You are designated 1st Heir and have assumed Host authority!", "ok");
-        setMessages(msgs => [...msgs, {
-          id: Date.now().toString(),
-          text: "🛡️ Nexus Failover: Host disconnected abruptly. You have assumed Authoritative Host status!",
-          sender: 'system',
-          timestamp: new Date()
-        }]);
-        setTimeout(() => {
-          createHostOfferRef.current?.();
-        }, 150);
+      // Automated Heir Succession when host disconnects:
+      if (dataChannels.current.size === 0) {
+        // No remaining live peer connections left on this node
+        if (roleRef.current === 'join') {
+          addLog("⚠️ Nexus Failover: All connections closed. Reverting to Host node...", "info");
+          setRole('host');
+          roleRef.current = 'host';
+          setQrPayload("");
+          setPasteBuffer("");
+          setTimeout(() => {
+            createHostOfferRef.current?.();
+          }, 150);
+        }
+      } else {
+        // Direct mesh data channels to remaining peer(s) ARE STILL ALIVE!
+        // Deterministically elect one host among the surviving peers so that surviving peers stay connected
+        const remainingProfIds = Array.from(peerIdToProfileId.current.values());
+        const allSurviving = [profile.id, ...remainingProfIds].filter((id, i, arr) => arr.indexOf(id) === i).sort();
+        
+        if (roleRef.current === 'join') {
+          if (allSurviving[0] === profile.id) {
+            // This node is deterministically elected the new Authoritative Host
+            setRole('host');
+            roleRef.current = 'host';
+            addLog("👑 Nexus Failover: Host disconnected abruptly. You have assumed Host authority! Direct mesh link with remaining peer(s) maintained.", "ok");
+            setMessages(msgs => [...msgs, {
+              id: Date.now().toString(),
+              text: "🛡️ Nexus Failover: Host disconnected abruptly. You have assumed Authoritative Host status! Direct mesh connection with remaining peer(s) preserved.",
+              sender: 'system',
+              timestamp: new Date()
+            }]);
+            dataChannels.current.forEach((dc) => {
+              if (dc.readyState === 'open') {
+                dc.send(JSON.stringify({ type: 'host-handoff', newHostId: profile.id, newHostName: profile.username }));
+              }
+            });
+            setTimeout(() => {
+              createHostOfferRef.current?.();
+            }, 150);
+          } else {
+            // Another surviving peer is the new Host; this node remains a joiner connected to them!
+            addLog("🛡️ Nexus Failover: Host disconnected abruptly. Connection with peer maintained via direct mesh.", "info");
+            setMessages(msgs => [...msgs, {
+              id: Date.now().toString(),
+              text: "🛡️ Nexus Failover: Host disconnected abruptly. Direct peer-to-peer connection with remaining peer(s) maintained!",
+              sender: 'system',
+              timestamp: new Date()
+            }]);
+          }
+        }
       }
     };
 
@@ -1060,11 +1119,17 @@ export default function App() {
               
               const updatedProfiles = { ...prev, [finalProfile.id]: finalProfile };
               
-              // Host relays new peer to existing peers
+              // Host relays new peer to existing peers and triggers mesh peer-to-peer connection
               if (roleRef.current === 'host') {
                 dataChannels.current.forEach((dc, otherId) => {
                   if (otherId !== peerId && dc.readyState === 'open') {
                     dc.send(JSON.stringify({ type: 'peer-joined', profile: finalProfile }));
+                    // Prompt existing peer to initiate direct mesh connection to the newly joined peer!
+                    dc.send(JSON.stringify({ 
+                      type: 'mesh-initiate', 
+                      targetProfile: finalProfile,
+                      targetProfileId: finalProfile.id
+                    }));
                   }
                 });
                 // Send existing profiles to new peer
@@ -1168,17 +1233,20 @@ export default function App() {
               });
             }
           } else if (data.type === 'chat') {
-            setMessages(prev => [...prev, {
-              id: data.id || (Math.random().toString(36).substring(2) + Date.now().toString(36)),
-              text: data.text,
-              audioData: data.audioData,
-              sender: 'them',
-              senderName: data.senderName,
-              senderColor: data.senderColor,
-              senderAvatar: data.senderAvatar || (data.senderId ? peerProfiles[data.senderId]?.avatarImage : undefined),
-              senderId: data.senderId,
-              timestamp: data.timestamp ? new Date(data.timestamp) : new Date()
-            }]);
+            setMessages(prev => {
+              if (data.id && prev.some(m => m.id === data.id)) return prev;
+              return [...prev, {
+                id: data.id || (Math.random().toString(36).substring(2) + Date.now().toString(36)),
+                text: data.text,
+                audioData: data.audioData,
+                sender: 'them',
+                senderName: data.senderName,
+                senderColor: data.senderColor,
+                senderAvatar: data.senderAvatar || (data.senderId ? peerProfiles[data.senderId]?.avatarImage : undefined),
+                senderId: data.senderId,
+                timestamp: data.timestamp ? new Date(data.timestamp) : new Date()
+              }];
+            });
             
             setUnreadChatCount(prev => activeTabRef.current !== 'chat' ? prev + 1 : 0);
             if (roleRef.current === 'host') {
@@ -1435,6 +1503,126 @@ export default function App() {
             const pc = peerConnections.current.get(peerId);
             if (pc) {
               await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            }
+          } else if (data.type === 'mesh-initiate') {
+            const targetProf = data.targetProfile;
+            const targetId = data.targetProfileId || targetProf?.id;
+            if (!targetId || targetId === profile.id) return;
+            const meshConnId = `mesh_${targetId}`;
+            if (peerConnections.current.has(meshConnId)) return;
+
+            addLog(`Establishing direct mesh link to ${targetProf?.username || 'peer'}...`, "info");
+            const createPeerFn = createPeerRef.current;
+            const waitForIceFn = waitForIceRef.current;
+            if (!createPeerFn || !waitForIceFn) return;
+
+            const pc = createPeerFn(meshConnId, false);
+            const dc = pc.createDataChannel('nexus-transfer');
+            setupDataChannel(dc, meshConnId);
+
+            pc.onicecandidate = (event) => {
+              if (event.candidate && channel.readyState === 'open') {
+                channel.send(JSON.stringify({
+                  type: 'mesh-signal',
+                  targetProfileId: targetId,
+                  senderProfileId: profile.id,
+                  candidate: event.candidate
+                }));
+              }
+            };
+
+            try {
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              await waitForIceFn(pc);
+              if (channel.readyState === 'open' && pc.localDescription) {
+                channel.send(JSON.stringify({
+                  type: 'mesh-signal',
+                  targetProfileId: targetId,
+                  senderProfileId: profile.id,
+                  senderProfile: profile,
+                  sdp: pc.localDescription
+                }));
+              }
+            } catch (err) {
+              console.error("Failed to initiate mesh offer:", err);
+            }
+          } else if (data.type === 'mesh-signal') {
+            if (roleRef.current === 'host') {
+              // Host routes signal to target peer's data channel
+              const targetProfId = data.targetProfileId;
+              for (const [pId, dc] of dataChannels.current.entries()) {
+                const profId = peerIdToProfileId.current.get(pId);
+                if (profId === targetProfId && dc.readyState === 'open') {
+                  dc.send(event.data);
+                  break;
+                }
+              }
+            } else {
+              // Joiner processes mesh signal
+              const senderProfId = data.senderProfileId;
+              if (!senderProfId || senderProfId === profile.id) return;
+              const meshConnId = `mesh_${senderProfId}`;
+              const createPeerFn = createPeerRef.current;
+              const waitForIceFn = waitForIceRef.current;
+
+              if (data.sdp) {
+                if (data.sdp.type === 'offer') {
+                  let pc = peerConnections.current.get(meshConnId);
+                  if (!pc && createPeerFn) {
+                    pc = createPeerFn(meshConnId, false);
+                  }
+                  if (pc) {
+                    pc.onicecandidate = (event) => {
+                      if (event.candidate && channel.readyState === 'open') {
+                        channel.send(JSON.stringify({
+                          type: 'mesh-signal',
+                          targetProfileId: senderProfId,
+                          senderProfileId: profile.id,
+                          candidate: event.candidate
+                        }));
+                      }
+                    };
+                    try {
+                      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                      const answer = await pc.createAnswer();
+                      await pc.setLocalDescription(answer);
+                      if (waitForIceFn) await waitForIceFn(pc);
+                      if (channel.readyState === 'open' && pc.localDescription) {
+                        channel.send(JSON.stringify({
+                          type: 'mesh-signal',
+                          targetProfileId: senderProfId,
+                          senderProfileId: profile.id,
+                          senderProfile: profile,
+                          sdp: pc.localDescription
+                        }));
+                      }
+                      addLog(`Direct mesh link established to ${data.senderProfile?.username || 'peer'}!`, "ok");
+                    } catch (err) {
+                      console.error("Failed to answer mesh offer:", err);
+                    }
+                  }
+                } else if (data.sdp.type === 'answer') {
+                  const pc = peerConnections.current.get(meshConnId);
+                  if (pc) {
+                    try {
+                      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                      addLog(`Direct mesh link established to peer!`, "ok");
+                    } catch (err) {
+                      console.error("Failed to apply mesh answer:", err);
+                    }
+                  }
+                }
+              } else if (data.candidate) {
+                const pc = peerConnections.current.get(meshConnId);
+                if (pc) {
+                  try {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                  } catch (err) {
+                    console.warn("Mesh ICE candidate error:", err);
+                  }
+                }
+              }
             }
           }
         } catch (e) {
@@ -1706,11 +1894,17 @@ export default function App() {
       }
     };
 
-    localConnectionRef.current = pc;
+    if (!id.startsWith('mesh_')) {
+      localConnectionRef.current = pc;
+    }
     return pc;
   }, [setupDataChannel, addLog]);
 
-  const waitForIce = (pc: RTCPeerConnection) => new Promise<void>((resolve) => {
+  useEffect(() => {
+    createPeerRef.current = createPeer;
+  }, [createPeer]);
+
+  const waitForIce = useCallback((pc: RTCPeerConnection) => new Promise<void>((resolve) => {
     if (pc.iceGatheringState === 'complete') {
       resolve();
       return;
@@ -1728,7 +1922,11 @@ export default function App() {
       pc.removeEventListener('icegatheringstatechange', check);
       resolve();
     }, timeout);
-  });
+  }), []);
+
+  useEffect(() => {
+    waitForIceRef.current = waitForIce;
+  }, [waitForIce]);
 
   const createHostOffer = useCallback(async () => {
     const id = (Math.random().toString(36).substring(2) + Date.now().toString(36));
@@ -2509,7 +2707,7 @@ export default function App() {
     });
 
     if (targetPeerId) {
-      const targetDc = dataChannels.current.get(targetPeerId);
+      const targetDc = getDcForPeer(targetPeerId);
       if (targetDc && targetDc.readyState === 'open') {
         targetDc.send(meta);
       }
@@ -2593,7 +2791,7 @@ export default function App() {
         let openCount = 0;
         let maxBuffer = 0;
         if (targetPeerId) {
-          const targetDc = dataChannels.current.get(targetPeerId);
+          const targetDc = getDcForPeer(targetPeerId);
           if (targetDc && targetDc.readyState === 'open') {
             openCount = 1;
             if (typeof targetDc.bufferedAmount === 'number') {
@@ -2639,7 +2837,7 @@ export default function App() {
 
           let anySent = false;
           if (targetPeerId) {
-            const targetDc = dataChannels.current.get(targetPeerId);
+            const targetDc = getDcForPeer(targetPeerId);
             if (targetDc && targetDc.readyState === 'open') {
               try {
                 targetDc.send(chunkData);
@@ -3617,15 +3815,15 @@ export default function App() {
               initial={{ scale: 0.95, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 20 }}
-              className="w-full max-w-6xl h-full md:h-[90vh] flex flex-col bg-background/95 md:rounded-3xl border border-white/10 shadow-2xl overflow-hidden relative"
+              className="w-full max-w-6xl h-full md:h-[90vh] flex flex-col bg-white dark:bg-[#0c0d10] text-text md:rounded-3xl border border-black/10 dark:border-white/10 shadow-2xl overflow-hidden relative"
             >
-              <div className="flex justify-between items-center p-4 border-b border-white/10">
-                <h2 className="text-lg font-bold flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-accent"/> Nexus Failover Control</h2>
-                <button onClick={() => setShowFailoverMenu(false)} className="p-2 rounded-full hover:bg-white/10 transition cursor-pointer">
-                  <X className="w-5 h-5 text-muted" />
+              <div className="flex justify-between items-center p-4 border-b border-black/10 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                <h2 className="text-lg font-bold flex items-center gap-2 text-text"><ShieldCheck className="w-5 h-5 text-accent"/> Nexus Failover Control</h2>
+                <button onClick={() => setShowFailoverMenu(false)} className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition cursor-pointer text-text" title="Close Failover Menu">
+                  <X className="w-5 h-5 text-muted hover:text-text transition-colors" />
                 </button>
               </div>
-              <div className="flex-1 overflow-hidden relative">
+              <div className="flex-1 overflow-hidden relative bg-slate-100/70 dark:bg-transparent">
                 <NexusFailoverHUD 
                   localUsername={profile.username}
                   localAvatarColor={profile.avatarColor}
@@ -3731,7 +3929,9 @@ export default function App() {
           const profId = peerIdToProfileId.current.get(peerId);
           if (profId && peerProfiles[profId]?.username) return peerProfiles[profId].username;
           if (peerProfiles[peerId]?.username) return peerProfiles[peerId].username;
-          const matched = (Object.values(peerProfiles) as UserProfile[]).find(p => p.id === peerId || p.id === profId);
+          const cleanId = peerId.replace(/^mesh_/, '');
+          if (peerProfiles[cleanId]?.username) return peerProfiles[cleanId].username;
+          const matched = (Object.values(peerProfiles) as UserProfile[]).find(p => p.id === peerId || p.id === profId || p.id === cleanId);
           if (matched?.username) return matched.username;
           return 'Remote Node';
         }}

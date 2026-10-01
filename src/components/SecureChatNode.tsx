@@ -112,12 +112,13 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
     audioChunksRef.current = [];
 
     try {
-      // Audio constraints for speech
+      // High-fidelity studio audio capture for voice messaging
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+          channelCount: 1,
+          echoCancellation: true, // Prevents acoustic feedback & clipping
+          noiseSuppression: false, // Disabling aggressive spectral gating preserves natural warm voice frequencies and eliminates metallic tinny sound
+          autoGainControl: true // AGC maintains full dynamic vocal loudness without distortion
         }
       });
       streamRef.current = stream;
@@ -153,7 +154,7 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
 
       const { mimeType } = getSupportedAudioMime();
       const recorderOptions: MediaRecorderOptions = {
-        audioBitsPerSecond: 32000 // High clarity Opus speech, 4x smaller payload
+        audioBitsPerSecond: 128000 // Studio-grade 128 kbps Opus audio
       };
       if (mimeType) {
         recorderOptions.mimeType = mimeType;
@@ -213,8 +214,8 @@ export const SecureChatNode: React.FC<SecureChatNodeProps> = ({
         cleanupRecording();
       };
 
-      // Gather chunks every 200ms
-      mediaRecorder.start(200);
+      // Continuous, unbroken high-fidelity audio stream with clean container headers
+      mediaRecorder.start();
       setIsRecording(true);
       setRecordingSeconds(0);
 

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Play, Pause, AlertCircle, Download, RotateCcw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Play, Pause, AlertCircle, Download } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface VoiceMessagePlayerProps {
@@ -9,33 +9,49 @@ interface VoiceMessagePlayerProps {
   senderColor?: string;
 }
 
-// Convert base64 data URL to a clean Blob
-function base64ToBlob(base64Data: string): Blob | null {
+// Efficient base64 to binary ArrayBuffer conversion
+function base64ToArrayBuffer(base64Data: string): { buffer: ArrayBuffer; contentType: string } | null {
   try {
-    if (base64Data.startsWith('blob:')) {
-      return null; // Already a blob URL
+    let base64 = base64Data;
+    let contentType = 'audio/webm';
+    if (base64Data.startsWith('data:')) {
+      const parts = base64Data.split(';base64,');
+      contentType = parts[0].replace('data:', '') || 'audio/webm';
+      base64 = parts[1] || '';
     }
-    const parts = base64Data.split(';base64,');
-    if (parts.length < 2) {
-      // Might be plain base64 without prefix
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      return new Blob([new Uint8Array(byteNumbers)], { type: 'audio/webm' });
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
-    const contentType = parts[0].replace('data:', '') || 'audio/webm';
-    const byteCharacters = atob(parts[1]);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    return new Blob([new Uint8Array(byteNumbers)], { type: contentType });
-  } catch (err) {
-    console.error("Failed to convert base64 to blob:", err);
+    return { buffer: bytes.buffer, contentType };
+  } catch (e) {
+    console.error("Failed to parse base64 audio:", e);
     return null;
   }
+}
+
+// Extracts real amplitude peaks from decoded PCM channel data for realistic voice waveform
+function extractWaveformFromBuffer(audioBuffer: AudioBuffer, numBars = 24): number[] {
+  const channelData = audioBuffer.getChannelData(0);
+  const totalSamples = channelData.length;
+  const blockSize = Math.floor(totalSamples / numBars);
+  const heights: number[] = [];
+
+  for (let i = 0; i < numBars; i++) {
+    const start = i * blockSize;
+    let sum = 0;
+    const count = Math.min(blockSize, totalSamples - start);
+    for (let j = 0; j < count; j++) {
+      sum += Math.abs(channelData[start + j]);
+    }
+    const avg = count > 0 ? sum / count : 0;
+    // Map average amplitude to percentage (between 25% and 100%)
+    const height = Math.min(100, Math.max(25, Math.round(avg * 400)));
+    heights.push(height);
+  }
+  return heights;
 }
 
 // Formats seconds into mm:ss
@@ -53,66 +69,130 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
   senderColor
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [hasError, setHasError] = useState(false);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Derive stable pseudo-waveform based on audio data hash
-  const waveHeights = useMemo(() => {
-    const bars = 24;
-    const heights: number[] = [];
-    let hash = 0;
-    for (let i = 0; i < Math.min(audioData.length, 200); i++) {
-      hash = (hash << 5) - hash + audioData.charCodeAt(i);
-      hash |= 0;
+  // Synchronous Blob URL generation on mount so <audio> has src instantly with 0ms delay
+  const [blobUrl, setBlobUrl] = useState<string | null>(() => {
+    if (!audioData) return null;
+    if (audioData.startsWith('blob:') || audioData.startsWith('http')) {
+      return audioData;
     }
-    for (let i = 0; i < bars; i++) {
-      const pseudo = Math.abs(Math.sin(hash + i * 1.7));
-      // height between 25% and 100%
-      heights.push(Math.max(25, Math.round(pseudo * 100)));
+    const parsed = base64ToArrayBuffer(audioData);
+    if (parsed) {
+      try {
+        const blob = new Blob([parsed.buffer], { type: parsed.contentType });
+        return URL.createObjectURL(blob);
+      } catch (_) {}
     }
-    return heights;
-  }, [audioData]);
+    return audioData; // Fallback to raw data URI
+  });
 
-  // Convert base64 to Blob URL to bypass browser data URL limits and improve playback
+  const [waveHeights, setWaveHeights] = useState<number[]>(() => [
+    30, 45, 60, 80, 50, 65, 90, 75, 55, 70, 85, 95, 60, 70, 80, 50, 40, 60, 75, 85, 65, 45, 35, 25
+  ]);
+
+  // Decode audio data in memory for realistic waveform amplitude calculation
   useEffect(() => {
-    let url: string;
-    let isCreated = false;
+    let active = true;
+    let createdUrl: string | null = null;
 
-    if (audioData.startsWith('blob:')) {
-      url = audioData;
-      setBlobUrl(url);
-    } else {
-      const blob = base64ToBlob(audioData);
-      if (blob) {
-        url = URL.createObjectURL(blob);
-        isCreated = true;
-        setBlobUrl(url);
-      } else {
-        // Fallback to data URL
-        url = audioData;
-        setBlobUrl(url);
+    const analyzeAudio = async () => {
+      try {
+        let arrayBuf: ArrayBuffer | null = null;
+        let mime = 'audio/webm';
+
+        if (audioData.startsWith('blob:') || audioData.startsWith('http')) {
+          setBlobUrl(audioData);
+          try {
+            const resp = await fetch(audioData);
+            arrayBuf = await resp.arrayBuffer();
+          } catch (_) {}
+        } else {
+          const parsed = base64ToArrayBuffer(audioData);
+          if (parsed) {
+            arrayBuf = parsed.buffer;
+            mime = parsed.contentType;
+            const blob = new Blob([arrayBuf], { type: mime });
+            createdUrl = URL.createObjectURL(blob);
+            setBlobUrl(createdUrl);
+          }
+        }
+
+        if (arrayBuf && active) {
+          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+          if (AudioCtx) {
+            try {
+              const ctx = new AudioCtx();
+              const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+              if (active) {
+                if (decoded.duration > 0 && isFinite(decoded.duration)) {
+                  setDuration(decoded.duration);
+                }
+                setWaveHeights(extractWaveformFromBuffer(decoded, 24));
+                setIsLoaded(true);
+              }
+              ctx.close().catch(() => {});
+            } catch (decodeErr) {
+              // Web Audio decode may fail on WebM without seek headers; native <audio> will still play smoothly
+              if (active) setIsLoaded(true);
+            }
+          }
+        }
+      } catch (err) {
+        if (active) setIsLoaded(true);
       }
-    }
+    };
+
+    analyzeAudio();
 
     return () => {
-      if (isCreated && url) {
-        URL.revokeObjectURL(url);
+      active = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
       }
     };
   }, [audioData]);
+
+  // Smooth playback time tracking via requestAnimationFrame (butter-smooth 60fps waveform progress)
+  useEffect(() => {
+    let animId: number | null = null;
+    if (isPlaying) {
+      const loop = () => {
+        if (audioRef.current) {
+          const t = audioRef.current.currentTime;
+          setCurrentTime(t);
+          const d = audioRef.current.duration;
+          if (isFinite(d) && !isNaN(d) && d > 0 && duration === 0) {
+            setDuration(d);
+          }
+          if (!audioRef.current.paused && !audioRef.current.ended) {
+            animId = requestAnimationFrame(loop);
+          }
+        }
+      };
+      animId = requestAnimationFrame(loop);
+    }
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [isPlaying, duration]);
 
   // Listen for global pause-all event so only one voice note plays at a time
   useEffect(() => {
     const handlePauseAll = (e: Event) => {
       const customEvent = e as CustomEvent<{ id: string }>;
-      if (customEvent.detail?.id !== id && audioRef.current && !audioRef.current.paused) {
-        audioRef.current.pause();
-        setIsPlaying(false);
+      if (customEvent.detail?.id !== id) {
+        if (audioRef.current && !audioRef.current.paused) {
+          audioRef.current.pause();
+          setIsPlaying(false);
+        }
       }
     };
 
@@ -122,7 +202,13 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
     };
   }, [id]);
 
-  const togglePlay = () => {
+  // Primary zero-latency playback toggle
+  const togglePlay = async () => {
+    // Stop any other active voice note across the app
+    window.dispatchEvent(
+      new CustomEvent('quantum-pause-voice-notes', { detail: { id } })
+    );
+
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -130,39 +216,50 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
       audio.pause();
       setIsPlaying(false);
     } else {
-      // Stop any other active voice note
-      window.dispatchEvent(
-        new CustomEvent('quantum-pause-voice-notes', { detail: { id } })
-      );
-
-      // Reset to start if finished
-      if (currentTime >= duration && duration > 0) {
-        audio.currentTime = 0;
+      let startFrom = currentTime;
+      if (startFrom >= (duration || audio.duration) && (duration > 0 || isFinite(audio.duration))) {
+        startFrom = 0;
         setCurrentTime(0);
       }
 
-      audio.play().then(() => {
+      audio.currentTime = startFrom;
+      audio.playbackRate = playbackRate;
+
+      try {
+        await audio.play();
         setIsPlaying(true);
         setHasError(false);
-      }).catch(err => {
-        console.warn("Audio playback failed:", err);
-        setHasError(true);
-        setIsPlaying(false);
-      });
+      } catch (err: any) {
+        console.warn("Audio playback failed on first attempt, retrying with reset source:", err);
+        try {
+          audio.load();
+          audio.currentTime = startFrom;
+          await audio.play();
+          setIsPlaying(true);
+          setHasError(false);
+        } catch (retryErr) {
+          console.error("Audio playback fatal error:", retryErr);
+          setHasError(true);
+          setIsPlaying(false);
+        }
+      }
     }
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     const audio = audioRef.current;
-    if (!audio || duration <= 0) return;
+    const effectiveDuration = duration > 0 ? duration : (audio && isFinite(audio.duration) ? audio.duration : 0);
+    if (effectiveDuration <= 0) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clickPos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const newTime = clickPos * duration;
-    
-    audio.currentTime = newTime;
+    const newTime = clickPos * effectiveDuration;
+
     setCurrentTime(newTime);
+    if (audio) {
+      audio.currentTime = newTime;
+    }
   };
 
   const cycleSpeed = (e: React.MouseEvent) => {
@@ -176,16 +273,18 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
 
   const downloadAudio = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!blobUrl) return;
+    const url = blobUrl || audioData;
+    if (!url) return;
     const a = document.createElement('a');
-    a.href = blobUrl;
+    a.href = url;
     a.download = `voice-message-${new Date().toISOString().slice(0, 19)}.webm`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   };
 
-  const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+  const effectiveDuration = duration > 0 ? duration : (audioRef.current && isFinite(audioRef.current.duration) ? audioRef.current.duration : 0);
+  const progress = effectiveDuration > 0 ? Math.min(1, currentTime / effectiveDuration) : 0;
 
   return (
     <div className={cn(
@@ -196,11 +295,11 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
         <audio
           ref={audioRef}
           src={blobUrl}
-          preload="metadata"
+          preload="auto"
           onLoadedMetadata={() => {
             if (audioRef.current) {
               const d = audioRef.current.duration;
-              if (isFinite(d) && !isNaN(d)) {
+              if (isFinite(d) && !isNaN(d) && d > 0 && duration === 0) {
                 setDuration(d);
               }
               setIsLoaded(true);
@@ -209,25 +308,19 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
           onDurationChange={() => {
             if (audioRef.current) {
               const d = audioRef.current.duration;
-              if (isFinite(d) && !isNaN(d)) {
+              if (isFinite(d) && !isNaN(d) && d > 0 && duration === 0) {
                 setDuration(d);
               }
             }
           }}
           onTimeUpdate={() => {
-            if (audioRef.current) {
+            if (audioRef.current && !isPlaying) {
               setCurrentTime(audioRef.current.currentTime);
-              // Handle WebM infinite duration issue dynamically
-              if (!isFinite(duration) || duration <= 0) {
-                if (audioRef.current.duration && isFinite(audioRef.current.duration)) {
-                  setDuration(audioRef.current.duration);
-                }
-              }
             }
           }}
           onEnded={() => {
             setIsPlaying(false);
-            setCurrentTime(duration);
+            setCurrentTime(effectiveDuration);
           }}
           onError={(e) => {
             console.warn("Audio element error on playback:", e);
@@ -300,7 +393,7 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
 
             {/* Timers & Speed Control */}
             <div className="flex items-center justify-between text-[10px] text-white/80 font-mono font-medium leading-none px-0.5">
-              <span>{formatTime(isPlaying || currentTime > 0 ? currentTime : duration)}</span>
+              <span>{formatTime(isPlaying || currentTime > 0 ? currentTime : effectiveDuration)}</span>
               
               <div className="flex items-center gap-2">
                 {/* Speed toggle */}
@@ -315,7 +408,7 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
                 
                 {/* Duration */}
                 <span className="text-white/60">
-                  {duration > 0 ? formatTime(duration) : (isLoaded ? "0:00" : "...")}
+                  {effectiveDuration > 0 ? formatTime(effectiveDuration) : (isLoaded ? "0:00" : "...")}
                 </span>
               </div>
             </div>

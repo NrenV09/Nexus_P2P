@@ -785,7 +785,7 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
               }
 
               case 'peer-left': {
-                const { peerId: leftPeerId, username: leftUsername } = payload || {};
+                const { peerId: leftPeerId, username: leftUsername, newHostId } = payload || {};
                 setPeers(prev => {
                   const next = new Map(prev);
                   next.delete(leftPeerId);
@@ -801,6 +801,31 @@ export function useNexusRTC(options: UseNexusRTCOptions = {}) {
                 batchManagers.current.delete(leftPeerId);
 
                 addLog('connection', `Peer disconnected: ${leftUsername || leftPeerId}`, leftPeerId);
+
+                // If the leaving peer was the host, handle dynamic failover to remaining peers
+                if (newHostId) {
+                  setHostId(newHostId);
+                  if (newHostId === localPeer.id) {
+                    setLocalPeer(prev => ({ ...prev, isHost: true }));
+                    addLog('signaling', '👑 Nexus Failover: Host disconnected abruptly. You have assumed Authoritative Host status!');
+                    // Connect immediately to all remaining peers in the room
+                    peers.forEach((p, pid) => {
+                      if (pid !== leftPeerId && pid !== localPeer.id) {
+                        getOrCreatePeerConnection(pid, true);
+                      }
+                    });
+                  } else {
+                    setPeers(prev => {
+                      const next = new Map(prev);
+                      const np = next.get(newHostId) as NexusPeer | undefined;
+                      if (np) {
+                        next.set(newHostId, { ...np, isHost: true });
+                      }
+                      return next;
+                    });
+                    addLog('signaling', `👑 Nexus Failover: Host authority transferred to peer ${newHostId}. Mesh maintained.`);
+                  }
+                }
                 break;
               }
 

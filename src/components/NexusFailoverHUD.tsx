@@ -456,7 +456,7 @@ export function NexusFailoverHUD({
     <div className="w-full h-full flex flex-col gap-3 sm:gap-4 lg:gap-5 overflow-y-auto p-3 sm:p-5 lg:p-6 pb-24 lg:pb-8 scrollbar-hide text-text">
       
       {/* Simulation Mode Toggle Banner */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 px-3.5 sm:px-4 py-2.5 rounded-2xl border glass-panel flex-shrink-0">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 px-3.5 sm:px-4 py-2.5 rounded-2xl border border-black/10 dark:border-white/10 bg-white dark:bg-white/5 backdrop-blur-md shadow-sm flex-shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className={cn(
             "w-2.5 h-2.5 rounded-full flex-shrink-0",
@@ -488,7 +488,7 @@ export function NexusFailoverHUD({
             "px-3.5 py-1.5 text-xs font-mono font-semibold rounded-xl border transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm flex-shrink-0",
             isSimActive
               ? "bg-accent text-white border-accent hover:opacity-90"
-              : "bg-white/60 dark:bg-white/10 hover:bg-white/80 dark:hover:bg-white/20 text-text border-white/30 dark:border-white/10"
+              : "bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 text-text border-black/10 dark:border-white/10"
           )}
         >
           <FlaskConical className="w-3.5 h-3.5" />
@@ -500,7 +500,7 @@ export function NexusFailoverHUD({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 flex-shrink-0">
         
         {/* Card 1: Current Host Node */}
-        <div className="glass-panel p-2.5 sm:p-3.5 lg:p-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5 sm:gap-3 border border-white/40 dark:border-white/10 shadow-sm relative overflow-hidden">
+        <div className="p-2.5 sm:p-3.5 lg:p-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5 sm:gap-3 bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 shadow-sm relative overflow-hidden backdrop-blur-md">
           <div className="w-8 h-8 sm:w-10 sm:h-10 lg:w-11 lg:h-11 rounded-lg sm:rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0">
             <Crown className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6" />
           </div>
@@ -521,7 +521,7 @@ export function NexusFailoverHUD({
         </div>
 
         {/* Card 2: Quorum Status */}
-        <div className="glass-panel p-2.5 sm:p-3.5 lg:p-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5 sm:gap-3 border border-white/40 dark:border-white/10 shadow-sm">
+        <div className="p-2.5 sm:p-3.5 lg:p-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5 sm:gap-3 bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 shadow-sm backdrop-blur-md">
           <div className={cn(
             "w-8 h-8 sm:w-10 sm:h-10 lg:w-11 lg:h-11 rounded-lg sm:rounded-xl flex items-center justify-center flex-shrink-0 border",
             quorumMet ? "bg-success/10 border-success/20 text-success" : "bg-red-500/10 border-red-500/20 text-red-500"
@@ -542,7 +542,7 @@ export function NexusFailoverHUD({
         </div>
 
         {/* Card 3: Local Node Role */}
-        <div className="glass-panel p-2.5 sm:p-3.5 lg:p-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5 sm:gap-3 border border-white/40 dark:border-white/10 shadow-sm">
+        <div className="p-2.5 sm:p-3.5 lg:p-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5 sm:gap-3 bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 shadow-sm backdrop-blur-md">
           <div className={cn(
             "w-8 h-8 sm:w-10 sm:h-10 lg:w-11 lg:h-11 rounded-lg sm:rounded-xl flex items-center justify-center flex-shrink-0 border",
             localRole === 'host' ? "bg-accent/10 border-accent/30 text-accent" : localRole === 'peer' ? "bg-blue-500/10 border-blue-500/20 text-blue-500" : "bg-amber-500/10 border-amber-500/20 text-amber-500 animate-pulse"
@@ -563,7 +563,7 @@ export function NexusFailoverHUD({
         </div>
 
         {/* Card 4: Heartbeat Pulse */}
-        <div className="glass-panel p-2.5 sm:p-3.5 lg:p-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5 sm:gap-3 border border-white/40 dark:border-white/10 shadow-sm">
+        <div className="p-2.5 sm:p-3.5 lg:p-4 rounded-xl sm:rounded-2xl flex items-center gap-2.5 sm:gap-3 bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 shadow-sm backdrop-blur-md">
           <div className={cn(
             "w-8 h-8 sm:w-10 sm:h-10 lg:w-11 lg:h-11 rounded-lg sm:rounded-xl border flex items-center justify-center flex-shrink-0 transition-transform duration-200",
             heartbeatBeat ? "scale-110 bg-rose-500/20 border-rose-500 text-rose-500" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
@@ -590,9 +590,9 @@ export function NexusFailoverHUD({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4 lg:gap-5 flex-1 min-h-0">
         
         {/* Left Column: Synchronized Peer Table */}
-        <div className="lg:col-span-8 flex flex-col glass-panel rounded-2xl sm:rounded-3xl p-3 sm:p-5 border border-white/40 dark:border-white/10 shadow-sm">
+        <div className="lg:col-span-8 flex flex-col bg-white dark:bg-white/5 rounded-2xl sm:rounded-3xl p-3 sm:p-5 border border-black/10 dark:border-white/10 shadow-sm backdrop-blur-md">
           
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 sm:pb-4 border-b border-white/20 dark:border-white/10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 sm:pb-4 border-b border-black/10 dark:border-white/10">
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm sm:text-base font-bold tracking-tight text-text flex items-center gap-2">
@@ -612,7 +612,7 @@ export function NexusFailoverHUD({
               </p>
             </div>
             
-            <div className="flex items-center gap-2 text-[11px] sm:text-xs font-mono bg-white/40 dark:bg-white/5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border border-white/30 dark:border-white/10 self-start sm:self-auto flex-shrink-0">
+            <div className="flex items-center gap-2 text-[11px] sm:text-xs font-mono bg-black/5 dark:bg-white/5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border border-black/10 dark:border-white/10 self-start sm:self-auto flex-shrink-0">
               <Clock className="w-3.5 h-3.5 text-accent flex-shrink-0" />
               <span>Next in Line: <strong className="text-accent">{isStandalone ? 'None (0 peers)' : (nextInLine?.username || 'None')}</strong></span>
             </div>
@@ -637,7 +637,7 @@ export function NexusFailoverHUD({
                         ? "bg-accent/10 border-accent/30" 
                         : isNext 
                           ? "bg-blue-500/10 border-blue-500/30" 
-                          : "bg-white/40 dark:bg-white/5 border-white/30 dark:border-white/10"
+                          : "bg-white dark:bg-white/5 border-black/10 dark:border-white/10"
                   )}
                 >
                   {/* Card Header: Seq #, Avatar, Name, Status */}
@@ -645,13 +645,13 @@ export function NexusFailoverHUD({
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={cn(
                         "px-1.5 py-0.5 rounded text-[10px] font-mono font-bold flex-shrink-0",
-                        isHost ? "bg-accent text-white" : "bg-white/60 dark:bg-white/10 text-text"
+                        isHost ? "bg-accent text-white" : "bg-black/5 dark:bg-white/10 text-text"
                       )}>
                         #{peer.joinOrder}
                       </span>
                       <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-sm flex-shrink-0 overflow-hidden", peer.avatarColor)}>
                         {peer.avatarImage ? (
-                          <img src={peer.avatarImage} alt={peer.username} className="w-full h-full object-cover" />
+                           <img src={peer.avatarImage} alt={peer.username} className="w-full h-full object-cover" />
                         ) : (
                           peer.username.charAt(0).toUpperCase()
                         )}
@@ -688,7 +688,7 @@ export function NexusFailoverHUD({
                   </div>
 
                   {/* Card Details Grid: Role, Failover Priority, Latency, Endpoint */}
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/15 dark:border-white/10 text-[10px] font-mono">
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-black/10 dark:border-white/10 text-[10px] font-mono">
                     <div className="flex items-center gap-1.5">
                       <span className="text-muted">Role:</span>
                       {isHost ? (
@@ -696,7 +696,7 @@ export function NexusFailoverHUD({
                           <Crown className="w-2.5 h-2.5" /> HOST
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-white/40 dark:bg-white/10 text-muted">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-black/5 dark:bg-white/10 text-muted">
                           PEER
                         </span>
                       )}
@@ -753,7 +753,7 @@ export function NexusFailoverHUD({
           <div className="hidden sm:block w-full overflow-x-auto mt-2 sm:mt-3 scrollbar-hide">
             <table className="w-full text-left border-collapse text-xs whitespace-nowrap sm:whitespace-normal">
               <thead>
-                <tr className="border-b border-white/10 text-muted font-mono uppercase text-[9px] sm:text-[10px] tracking-wider">
+                <tr className="border-b border-black/10 dark:border-white/10 text-muted font-mono uppercase text-[9px] sm:text-[10px] tracking-wider">
                   <th className="py-2 px-2 sm:px-3 text-center sm:text-left">Seq #</th>
                   <th className="py-2 px-2 sm:px-3">Node Identity</th>
                   <th className="py-2 px-2 sm:px-3 hidden md:table-cell">Endpoint</th>
@@ -766,7 +766,7 @@ export function NexusFailoverHUD({
                   )}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
+              <tbody className="divide-y divide-black/5 dark:divide-white/5">
                 {peers.map((peer) => {
                   const isHost = peer.role === 'host';
                   const isLocal = peer.peerId === (localPeerId || 'local_node') || peer.peerId === 'local_user_03';
@@ -778,14 +778,14 @@ export function NexusFailoverHUD({
                       key={peer.peerId}
                       className={cn(
                         "transition-colors",
-                        isDead ? "opacity-40 bg-red-500/5" : isHost ? "bg-accent/5 font-medium" : isNext ? "bg-blue-500/5" : "hover:bg-white/30 dark:hover:bg-white/5"
+                        isDead ? "opacity-40 bg-red-500/5" : isHost ? "bg-accent/5 font-medium" : isNext ? "bg-blue-500/5" : "hover:bg-black/5 dark:hover:bg-white/5"
                       )}
                     >
                       {/* Seq # */}
                       <td className="py-2.5 sm:py-3 px-2 sm:px-3 font-mono font-bold text-center sm:text-left">
                         <span className={cn(
                           "px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs",
-                          isHost ? "bg-accent text-white" : "bg-white/60 dark:bg-white/10 text-text"
+                          isHost ? "bg-accent text-white" : "bg-slate-100 dark:bg-white/10 text-text font-semibold"
                         )}>
                           #{peer.joinOrder}
                         </span>
@@ -839,7 +839,7 @@ export function NexusFailoverHUD({
                             <Crown className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> HOST
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-medium bg-white/40 dark:bg-white/10 text-muted">
+                          <span className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-medium bg-slate-100 dark:bg-white/10 text-muted">
                             PEER
                           </span>
                         )}
@@ -911,7 +911,7 @@ export function NexusFailoverHUD({
 
           {/* Standalone Empty-State Notification (When not connected to anyone) */}
           {isStandalone && (
-            <div className="mt-3 p-3 sm:p-4 rounded-2xl bg-white/40 dark:bg-white/5 border border-white/30 dark:border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+            <div className="mt-3 p-3 sm:p-4 rounded-2xl bg-slate-50 dark:bg-white/5 border border-black/10 dark:border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 shrink-0">
                   <WifiOff className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -936,7 +936,7 @@ export function NexusFailoverHUD({
           )}
 
           {/* Failover Telemetry Log Feed */}
-          <div className="mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-white/20 dark:border-white/10 flex flex-col">
+          <div className="mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-black/10 dark:border-white/10 flex flex-col">
             <div className="text-[10px] sm:text-[11px] font-mono text-muted uppercase tracking-wider mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 text-accent animate-pulse" />
@@ -952,7 +952,7 @@ export function NexusFailoverHUD({
 
             <div 
               ref={logContainerRef}
-              className="h-28 sm:h-32 overflow-y-auto pr-1 space-y-1.5 font-mono text-[10px] sm:text-[11px] bg-black/5 dark:bg-black/20 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-white/10 scrollbar-hide"
+              className="h-28 sm:h-32 overflow-y-auto pr-1 space-y-1.5 font-mono text-[10px] sm:text-[11px] bg-slate-100/70 dark:bg-black/20 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-black/10 dark:border-white/10 scrollbar-hide"
             >
               {logs.map(l => (
                 <div key={l.id} className="flex items-start gap-2">
@@ -976,7 +976,7 @@ export function NexusFailoverHUD({
         {/* Right Column: Failover Simulation & Testing Suite */}
         <div className="lg:col-span-4 flex flex-col gap-3 sm:gap-4">
           
-          <div className="glass-panel p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl border border-white/40 dark:border-white/10 shadow-sm flex flex-col gap-3">
+          <div className="bg-white dark:bg-white/5 p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl border border-black/10 dark:border-white/10 shadow-sm flex flex-col gap-3 backdrop-blur-md">
             <div className="flex items-center justify-between">
               <h4 className="text-xs sm:text-sm font-bold text-text flex items-center gap-2">
                 <Zap className="w-4 h-4 text-accent" />
@@ -1080,7 +1080,7 @@ export function NexusFailoverHUD({
             ) : role === 'host' ? (
               /* Live Host Authority Controls */
               <div className="flex flex-col gap-3 py-1">
-                <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                <div className="flex items-center justify-between pb-2 border-b border-black/10 dark:border-white/10">
                   <div className="flex items-center gap-2">
                     <Crown className="w-4 h-4 text-accent" />
                     <span className="text-xs font-bold text-text uppercase tracking-wider">Host Authority Controls</span>
@@ -1099,7 +1099,7 @@ export function NexusFailoverHUD({
                         handleSimulateGracefulHandoff();
                       }
                     }}
-                    className="w-full text-left p-3 rounded-2xl bg-white/40 dark:bg-white/5 hover:bg-accent/10 border border-white/40 dark:border-white/10 hover:border-accent/30 transition-all group cursor-pointer shadow-sm active:scale-[0.99]"
+                    className="w-full text-left p-3 rounded-2xl bg-slate-50 dark:bg-white/5 hover:bg-accent/10 border border-black/10 dark:border-white/10 hover:border-accent/30 transition-all group cursor-pointer shadow-sm active:scale-[0.99]"
                   >
                     <div className="flex items-center justify-between text-xs font-bold text-accent mb-1">
                       <span className="flex items-center gap-1.5">
@@ -1120,7 +1120,7 @@ export function NexusFailoverHUD({
                         handleSimulatePartition();
                       }
                     }}
-                    className="w-full text-left p-3 rounded-2xl bg-white/40 dark:bg-white/5 hover:bg-purple-500/10 border border-white/40 dark:border-white/10 hover:border-purple-500/30 transition-all group cursor-pointer shadow-sm active:scale-[0.99]"
+                    className="w-full text-left p-3 rounded-2xl bg-slate-50 dark:bg-white/5 hover:bg-purple-500/10 border border-black/10 dark:border-white/10 hover:border-purple-500/30 transition-all group cursor-pointer shadow-sm active:scale-[0.99]"
                   >
                     <div className="flex items-center justify-between text-xs font-bold text-purple-500 mb-1">
                       <span className="flex items-center gap-1.5">
@@ -1134,11 +1134,11 @@ export function NexusFailoverHUD({
                   </button>
                 </div>
 
-                <div className="pt-2 border-t border-white/10 flex items-center justify-between">
+                <div className="pt-2 border-t border-black/10 dark:border-white/10 flex items-center justify-between">
                   <span className="text-[10px] text-muted font-mono">Sandbox Scenarios</span>
                   <button
                     onClick={handleToggleSim}
-                    className="px-2.5 py-1 rounded-xl bg-white/40 dark:bg-white/10 hover:bg-accent hover:text-white text-[10px] font-semibold text-text transition-all flex items-center gap-1.5 cursor-pointer border border-white/20"
+                    className="px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-white/10 hover:bg-accent hover:text-white text-[10px] font-semibold text-text transition-all flex items-center gap-1.5 cursor-pointer border border-black/10 dark:border-white/20"
                   >
                     <FlaskConical className="w-3 h-3" />
                     <span>Enter Simulation</span>
@@ -1148,7 +1148,7 @@ export function NexusFailoverHUD({
             ) : (
               /* Locked State in Live Mode for Joiners */
               <div className="flex flex-col items-center text-center py-4 sm:py-6 px-2 sm:px-3 gap-3">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 flex items-center justify-center text-muted">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-slate-100 dark:bg-white/5 border border-black/10 dark:border-white/10 flex items-center justify-center text-muted">
                   <Lock className="w-5 h-5 sm:w-6 sm:h-6 text-muted" />
                 </div>
                 
@@ -1173,7 +1173,7 @@ export function NexusFailoverHUD({
           </div>
 
           {/* Protocol Invariants Card */}
-          <div className="glass-panel p-3.5 sm:p-4 rounded-2xl sm:rounded-3xl border border-white/40 dark:border-white/10 shadow-sm flex flex-col gap-2 text-xs">
+          <div className="bg-white dark:bg-white/5 p-3.5 sm:p-4 rounded-2xl sm:rounded-3xl border border-black/10 dark:border-white/10 shadow-sm flex flex-col gap-2 text-xs backdrop-blur-md">
             <h5 className="font-bold text-text flex items-center gap-1.5 text-xs">
               <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
               <span>Nexus Protocol Invariants</span>
