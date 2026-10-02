@@ -3011,43 +3011,45 @@ export default function App() {
 
   const isPeerConnectedToHost = role === 'join' && (status === 'connected' || connectedCount > 0);
 
-  return (
-    <div className="h-screen w-full overflow-hidden flex flex-col relative text-[14px] bg-transparent text-text antialiased">
-      {!isUnlocked && (
-        <div className="fixed inset-0 z-[99999] bg-[#0d1117] text-[#c9d1d9] flex flex-col items-center justify-center p-6 select-none font-sans antialiased">
-          <div className="max-w-md w-full text-center flex flex-col items-center">
-            <div className="w-16 h-16 rounded-2xl bg-[#21262d] border border-[#30363d] flex items-center justify-center text-red-400 mb-6 shadow-xl">
-              <Lock className="w-8 h-8" />
-            </div>
-            
-            {/* Interactive 403 Number */}
-            <div 
-              onMouseDown={startHolding}
-              onMouseUp={stopHolding}
-              onMouseLeave={stopHolding}
-              onTouchStart={startHolding}
-              onTouchEnd={stopHolding}
-              className="relative cursor-pointer group mb-2"
-              title="Tap and hold to unlock"
-            >
-              <h1 className="text-7xl sm:text-8xl font-black tracking-tighter text-white font-mono group-hover:text-accent transition-colors">
-                403
-              </h1>
-            </div>
+  if (!isUnlocked) {
+    return (
+      <div className="h-screen w-full overflow-hidden flex flex-col relative text-[14px] bg-[#0d1117] text-[#c9d1d9] antialiased select-none items-center justify-center p-6">
+        <div className="max-w-md w-full text-center flex flex-col items-center">
+          <div className="w-16 h-16 rounded-2xl bg-[#21262d] border border-[#30363d] flex items-center justify-center text-red-400 mb-6 shadow-xl">
+            <Lock className="w-8 h-8" />
+          </div>
+          
+          {/* Interactive 403 Number */}
+          <div 
+            onMouseDown={startHolding}
+            onMouseUp={stopHolding}
+            onMouseLeave={stopHolding}
+            onTouchStart={startHolding}
+            onTouchEnd={stopHolding}
+            className="relative cursor-pointer group mb-2"
+            title="Tap and hold to unlock"
+          >
+            <h1 className="text-7xl sm:text-8xl font-black tracking-tighter text-white font-mono group-hover:text-accent transition-colors">
+              403
+            </h1>
+          </div>
 
-            <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 mt-2">Access Forbidden</h2>
-            <p className="text-sm text-[#8b949e] mb-8 leading-relaxed max-w-sm">
-              You don't have permission to access this resource. Please verify your network permissions or contact the system administrator.
-            </p>
+          <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 mt-2">Access Forbidden</h2>
+          <p className="text-sm text-[#8b949e] mb-8 leading-relaxed max-w-sm">
+            You don't have permission to access this resource. Please verify your network permissions or contact the system administrator.
+          </p>
 
-            <div className="p-4 rounded-xl bg-[#161b22] border border-[#30363d] text-xs text-[#8b949e] w-full max-w-sm flex items-center justify-between font-mono">
-              <span>Error Code: HTTP 403</span>
-              <span>Node: GATEWAY-01</span>
-            </div>
+          <div className="p-4 rounded-xl bg-[#161b22] border border-[#30363d] text-xs text-[#8b949e] w-full max-w-sm flex items-center justify-between font-mono">
+            <span>Error Code: HTTP 403</span>
+            <span>Node: GATEWAY-01</span>
           </div>
         </div>
-      )}
+      </div>
+    );
+  }
 
+  return (
+    <div className="h-screen w-full overflow-hidden flex flex-col relative text-[14px] bg-transparent text-text antialiased">
       <AnimatePresence>
         {showProfileModal && (
           <ProfileModal 
