@@ -338,7 +338,7 @@ export const POLICY_SECTIONS: PolicySection[] = [
         heading: '1. Project Maintainer & Open Source Entity',
         paragraphs: [
           'Quantum Link is maintained as an open-source decentralized communications software project by the Quantum Link Development Collective.',
-          'Project Lead & Contact Email: namanv2703@gmail.com / legal@quantumlink.dev'
+          'Project Lead & Contact Email: legal@quantumlink.dev'
         ]
       },
       {

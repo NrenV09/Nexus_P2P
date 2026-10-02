@@ -221,7 +221,11 @@ export default function App() {
   const [showFailoverMenu, setShowFailoverMenu] = useState(false);
   const [showNetworkMapModal, setShowNetworkMapModal] = useState(false);
   const [showCreatorPopup, setShowCreatorPopup] = useState(false);
-  const [titleTapCount, setTitleTapCount] = useState(0);
+  const [isHoldingTitle, setIsHoldingTitle] = useState(false);
+  const [titleHoldProgress, setTitleHoldProgress] = useState(0); // 0 to 100%
+  const [titleHoldSeconds, setTitleHoldSeconds] = useState(0); // 0 to 60
+  const holdStartTimestampRef = useRef<number | null>(null);
+  const holdTimerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isCallActive, setIsCallActive] = useState(false);
   const [isCallMinimized, setIsCallMinimized] = useState(false);
@@ -241,21 +245,65 @@ export default function App() {
     isSimulationRef.current = isSimulation;
   }, [isSimulation]);
 
-  const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const startTitleHold = useCallback((e: React.PointerEvent) => {
+    // Only primary button / touch
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    
+    holdStartTimestampRef.current = Date.now();
+    setIsHoldingTitle(true);
+    setTitleHoldProgress(0);
+    setTitleHoldSeconds(0);
+    playTapTick(1);
 
-  const handleTitleClick = useCallback(() => {
-    setTitleTapCount(prev => {
-      const next = prev + 1;
-      if (next >= 10) {
-        setShowCreatorPopup(true);
-        return 0;
-      } else {
-        playTapTick(next);
-        return next;
+    if (holdTimerIntervalRef.current) clearInterval(holdTimerIntervalRef.current);
+
+    holdTimerIntervalRef.current = setInterval(() => {
+      if (!holdStartTimestampRef.current) return;
+      const elapsed = Date.now() - holdStartTimestampRef.current;
+      const seconds = Math.min(Math.floor(elapsed / 1000), 60);
+      const progress = Math.min((elapsed / 60000) * 100, 100);
+
+      setTitleHoldSeconds(seconds);
+      setTitleHoldProgress(progress);
+
+      // Gentle audio tick every second
+      if (seconds > 0 && Math.floor(elapsed) % 1000 < 100) {
+        playTapTick(1 + (seconds % 6));
       }
-    });
-    if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
-    tapTimeoutRef.current = setTimeout(() => setTitleTapCount(0), 1500);
+
+      // Reached 1 full minute (60 seconds)
+      if (elapsed >= 60000) {
+        if (holdTimerIntervalRef.current) clearInterval(holdTimerIntervalRef.current);
+        holdTimerIntervalRef.current = null;
+        holdStartTimestampRef.current = null;
+        setIsHoldingTitle(false);
+        setTitleHoldProgress(0);
+        setTitleHoldSeconds(0);
+
+        try {
+          if ('vibrate' in navigator) (navigator as any).vibrate?.([80, 50, 80]);
+        } catch (_) {}
+
+        setShowCreatorPopup(true);
+      }
+    }, 100);
+  }, []);
+
+  const cancelTitleHold = useCallback(() => {
+    if (holdTimerIntervalRef.current) {
+      clearInterval(holdTimerIntervalRef.current);
+      holdTimerIntervalRef.current = null;
+    }
+    holdStartTimestampRef.current = null;
+    setIsHoldingTitle(false);
+    setTitleHoldProgress(0);
+    setTitleHoldSeconds(0);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (holdTimerIntervalRef.current) clearInterval(holdTimerIntervalRef.current);
+    };
   }, []);
 
   // --- Refs ---
@@ -3034,36 +3082,54 @@ export default function App() {
             <RefreshCw className={cn("w-4 h-4 lg:w-5 lg:h-5", isSimulation && "animate-spin")} />
           </button>
           <div 
-            className="min-w-0 cursor-pointer select-none relative group" 
-            onClick={handleTitleClick}
-            title={titleTapCount > 0 ? `${10 - titleTapCount} taps left to unlock easter egg` : "Quantum Link"}
+            className="min-w-0 cursor-pointer select-none relative group touch-none" 
+            onPointerDown={startTitleHold}
+            onPointerUp={cancelTitleHold}
+            onPointerLeave={cancelTitleHold}
+            onPointerCancel={cancelTitleHold}
+            onContextMenu={(e) => e.preventDefault()}
+            title={isHoldingTitle ? `Hold to unlock: ${60 - titleHoldSeconds}s remaining` : "Quantum Link (Press and hold for 1 min)"}
           >
             <motion.div
-              animate={titleTapCount > 0 ? { scale: [1, 0.95, 1] } : {}}
-              transition={{ duration: 0.12 }}
+              animate={isHoldingTitle ? { scale: [1, 1.02, 1] } : {}}
+              transition={{ repeat: Infinity, duration: 1.2 }}
+              className="relative"
             >
               <h1 className="text-sm md:text-base lg:text-lg font-semibold tracking-tight text-text whitespace-nowrap flex items-center gap-1.5">
                 <span className="hidden sm:inline">Quantum Link</span>
                 <span className="sm:hidden">Q-Link</span>
                 <span className="text-[10px] lg:text-xs text-muted font-normal">v7.8.4</span>
-                {titleTapCount >= 3 && (
+                {isHoldingTitle && (
                   <motion.span
                     initial={{ scale: 0, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
                     exit={{ scale: 0, opacity: 0 }}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-500 dark:text-cyan-400 border border-cyan-500/40 text-[9px] font-mono font-bold animate-pulse"
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-500 dark:text-cyan-400 border border-cyan-500/40 text-[9px] font-mono font-bold"
                   >
-                    ⚡ {10 - titleTapCount}
+                    ⚡ {60 - titleHoldSeconds}s
                   </motion.span>
                 )}
               </h1>
+
+              {/* Charging progress bar under the title when holding */}
+              {isHoldingTitle && (
+                <div className="w-full h-1 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden mt-1">
+                  <div 
+                    className="h-full bg-gradient-to-r from-cyan-500 via-accent to-purple-500 rounded-full transition-all duration-100"
+                    style={{ width: `${titleHoldProgress}%` }}
+                  />
+                </div>
+              )}
+
               <div className="text-[9px] md:text-[10px] lg:text-xs text-muted flex items-center gap-1 lg:gap-2 mt-0.5 whitespace-nowrap">
                 <span className={cn(
                   "h-1.5 w-1.5 lg:h-2 lg:w-2 rounded-full flex-shrink-0",
-                  status === "connected" ? "bg-success" : status === "handshaking" ? "bg-accent animate-pulse" : "bg-muted"
+                  isHoldingTitle ? "bg-cyan-400 animate-ping" : status === "connected" ? "bg-success" : status === "handshaking" ? "bg-accent animate-pulse" : "bg-muted"
                 )} />
                 <span className="truncate">
-                  {status === "connected" ? (isSimulation ? "Network Simulated" : "Network Secured") : status === "handshaking" ? "Syncing..." : "Disconnected"}
+                  {isHoldingTitle 
+                    ? `Holding... ${titleHoldSeconds}s / 60s` 
+                    : (status === "connected" ? (isSimulation ? "Network Simulated" : "Network Secured") : status === "handshaking" ? "Syncing..." : "Disconnected")}
                 </span>
               </div>
             </motion.div>
