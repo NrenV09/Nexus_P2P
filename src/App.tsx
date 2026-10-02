@@ -698,6 +698,14 @@ export default function App() {
   const holdStartTimeRef = useRef<number>(0);
   const animationFrameRef = useRef<any>(null);
 
+  // 30 taps without a 1.5s delay to trigger PIN prompt (PIN: 1289)
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState(false);
+  const tapCountRef = useRef(0);
+  const lastTapTimeRef = useRef(0);
+  const tapResetTimerRef = useRef<any>(null);
+
   const startHolding = () => {
     holdStartTimeRef.current = Date.now();
     const duration = 120000; // 2 minutes in ms
@@ -726,6 +734,54 @@ export default function App() {
       cancelAnimationFrame(animationFrameRef.current);
     }
     setHoldProgress(0);
+  };
+
+  const handlePointerUp = () => {
+    stopHolding();
+    const now = Date.now();
+    const pressDuration = now - holdStartTimeRef.current;
+
+    // If released within 800ms, consider it a tap
+    if (pressDuration < 800) {
+      if (now - lastTapTimeRef.current <= 1500) {
+        tapCountRef.current += 1;
+      } else {
+        tapCountRef.current = 1;
+      }
+      lastTapTimeRef.current = now;
+
+      if (tapResetTimerRef.current) {
+        clearTimeout(tapResetTimerRef.current);
+      }
+      tapResetTimerRef.current = setTimeout(() => {
+        tapCountRef.current = 0;
+      }, 1500);
+
+      if (tapCountRef.current >= 30) {
+        tapCountRef.current = 0;
+        if (tapResetTimerRef.current) clearTimeout(tapResetTimerRef.current);
+        setShowPinModal(true);
+        setPinInput('');
+        setPinError(false);
+      }
+    }
+  };
+
+  const handlePinSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (pinInput.trim() === '1289') {
+      setIsUnlocked(true);
+      setShowPinModal(false);
+      try {
+        localStorage.setItem('app_unlocked_403', 'true');
+      } catch (err) {}
+    } else {
+      setPinError(true);
+      setTimeout(() => {
+        setPinInput('');
+        setPinError(false);
+      }, 1200);
+    }
   };
 
   useEffect(() => {
@@ -3022,12 +3078,12 @@ export default function App() {
           {/* Interactive 403 Number */}
           <div 
             onMouseDown={startHolding}
-            onMouseUp={stopHolding}
+            onMouseUp={handlePointerUp}
             onMouseLeave={stopHolding}
             onTouchStart={startHolding}
-            onTouchEnd={stopHolding}
-            className="relative cursor-pointer group mb-2"
-            title="Tap and hold to unlock"
+            onTouchEnd={handlePointerUp}
+            className="relative cursor-pointer group mb-2 active:scale-95 transition-transform"
+            title="Access Forbidden"
           >
             <h1 className="text-7xl sm:text-8xl font-black tracking-tighter text-white font-mono group-hover:text-accent transition-colors">
               403
@@ -3044,6 +3100,85 @@ export default function App() {
             <span>Node: GATEWAY-01</span>
           </div>
         </div>
+
+        {/* PIN Security Override Modal (triggered by 30 rapid taps) */}
+        {showPinModal && (
+          <div className="fixed inset-0 z-[100000] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-[#161b22] border border-[#30363d] rounded-2xl w-full max-w-xs sm:max-w-sm p-6 text-center shadow-2xl relative">
+              <button 
+                type="button" 
+                onClick={() => setShowPinModal(false)}
+                className="absolute top-4 right-4 text-[#8b949e] hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+                title="Cancel"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-12 h-12 rounded-xl bg-[#21262d] border border-[#30363d] flex items-center justify-center text-accent mx-auto mb-4 shadow-inner">
+                <Lock className="w-6 h-6" />
+              </div>
+
+              <h3 className="text-lg font-bold text-white mb-1">Security Challenge</h3>
+              <p className="text-xs text-[#8b949e] mb-5">Enter authorization PIN to unlock node access.</p>
+
+              <form onSubmit={handlePinSubmit} className="space-y-4">
+                <div className="relative">
+                  <input
+                    type="password"
+                    maxLength={8}
+                    autoFocus
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={pinInput}
+                    onChange={(e) => {
+                      setPinError(false);
+                      setPinInput(e.target.value);
+                    }}
+                    placeholder="••••"
+                    className={cn(
+                      "w-full text-center text-2xl tracking-[0.5em] font-mono py-3 px-4 rounded-xl bg-[#0d1117] border text-white focus:outline-none transition-all placeholder:tracking-normal placeholder:text-muted",
+                      pinError ? "border-red-500 bg-red-500/10 text-red-400" : "border-[#30363d] focus:border-accent focus:ring-1 focus:ring-accent"
+                    )}
+                  />
+                </div>
+
+                {pinError && (
+                  <p className="text-xs text-red-400 font-medium">Invalid PIN. Access denied.</p>
+                )}
+
+                {/* Keypad */}
+                <div className="grid grid-cols-3 gap-2 pt-2">
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => {
+                        setPinError(false);
+                        if (k === 'C') {
+                          setPinInput('');
+                        } else if (k === '⌫') {
+                          setPinInput(prev => prev.slice(0, -1));
+                        } else {
+                          setPinInput(prev => (prev.length < 8 ? prev + k : prev));
+                        }
+                      }}
+                      className="py-2.5 rounded-xl bg-[#21262d] hover:bg-[#30363d] active:bg-[#30363d]/80 text-white font-mono font-semibold text-lg transition-colors active:scale-95 cursor-pointer shadow-xs"
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-accent hover:bg-accent/90 active:scale-98 text-white font-semibold text-sm transition-all shadow-md cursor-pointer mt-2"
+                >
+                  Confirm PIN
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
