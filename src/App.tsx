@@ -3098,7 +3098,7 @@ export default function App() {
 
           <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 mt-2">Free Quota Exhausted</h2>
           <p className="text-sm text-[#8b949e] mb-6 leading-relaxed max-w-sm">
-            This deployment has reached its free tier usage and bandwidth limit. Public access has been temporarily restricted.
+            This deployment has reached its free tier usage and bandwidth limit. Public access has been permanently disabled.
           </p>
           <div className="mb-6 p-3 rounded-xl bg-[#21262d]/60 border border-[#30363d] text-xs text-[#c9d1d9] max-w-sm leading-relaxed text-left">
             <span className="font-semibold text-amber-400 block mb-1">Notice for visitors:</span>
