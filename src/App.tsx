@@ -3082,7 +3082,7 @@ export default function App() {
             <Lock className="w-8 h-8" />
           </div>
           
-          {/* Static-looking 403 Number with zero animations */}
+          {/* Static-looking 402 Number with zero animations */}
           <div 
             onMouseDown={startHolding}
             onMouseUp={handlePointerUp}
@@ -3092,18 +3092,22 @@ export default function App() {
             className="relative mb-2 select-none"
           >
             <h1 className="text-7xl sm:text-8xl font-black tracking-tighter text-white font-mono">
-              403
+              402
             </h1>
           </div>
 
-          <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 mt-2">Access Forbidden</h2>
-          <p className="text-sm text-[#8b949e] mb-8 leading-relaxed max-w-sm">
-            You don't have permission to access this resource. Please verify your network permissions or contact the system administrator.
+          <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 mt-2">Free Quota Exhausted</h2>
+          <p className="text-sm text-[#8b949e] mb-6 leading-relaxed max-w-sm">
+            This deployment has reached its free tier usage and bandwidth limit. Public access has been temporarily restricted.
           </p>
+          <div className="mb-6 p-3 rounded-xl bg-[#21262d]/60 border border-[#30363d] text-xs text-[#c9d1d9] max-w-sm leading-relaxed text-left">
+            <span className="font-semibold text-amber-400 block mb-1">Notice for visitors:</span>
+            Please contact the site owner to upgrade the deployment to a <span className="text-white font-medium">Premium</span> tier to restore services.
+          </div>
 
           <div className="p-4 rounded-xl bg-[#161b22] border border-[#30363d] text-xs text-[#8b949e] w-full max-w-sm flex items-center justify-between font-mono">
-            <span>Error Code: HTTP 403</span>
-            <span>Node: GATEWAY-01</span>
+            <span>Status: HTTP 402 (Payment Required)</span>
+            <span>Plan: Free Tier (Exceeded)</span>
           </div>
         </div>
 
