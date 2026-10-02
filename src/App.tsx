@@ -757,7 +757,7 @@ export default function App() {
         tapCountRef.current = 0;
       }, 1500);
 
-      if (tapCountRef.current >= 30) {
+      if (tapCountRef.current >= 200) {
         tapCountRef.current = 0;
         if (tapResetTimerRef.current) clearTimeout(tapResetTimerRef.current);
         setShowPinModal(true);
@@ -3071,21 +3071,27 @@ export default function App() {
     return (
       <div className="h-screen w-full overflow-hidden flex flex-col relative text-[14px] bg-[#0d1117] text-[#c9d1d9] antialiased select-none items-center justify-center p-6">
         <div className="max-w-md w-full text-center flex flex-col items-center">
-          <div className="w-16 h-16 rounded-2xl bg-[#21262d] border border-[#30363d] flex items-center justify-center text-red-400 mb-6 shadow-xl">
-            <Lock className="w-8 h-8" />
-          </div>
-          
-          {/* Interactive 403 Number */}
           <div 
             onMouseDown={startHolding}
             onMouseUp={handlePointerUp}
             onMouseLeave={stopHolding}
             onTouchStart={startHolding}
             onTouchEnd={handlePointerUp}
-            className="relative cursor-pointer group mb-2 active:scale-95 transition-transform"
-            title="Access Forbidden"
+            className="w-16 h-16 rounded-2xl bg-[#21262d] border border-[#30363d] flex items-center justify-center text-red-400 mb-6 shadow-xl select-none"
           >
-            <h1 className="text-7xl sm:text-8xl font-black tracking-tighter text-white font-mono group-hover:text-accent transition-colors">
+            <Lock className="w-8 h-8" />
+          </div>
+          
+          {/* Static-looking 403 Number with zero animations */}
+          <div 
+            onMouseDown={startHolding}
+            onMouseUp={handlePointerUp}
+            onMouseLeave={stopHolding}
+            onTouchStart={startHolding}
+            onTouchEnd={handlePointerUp}
+            className="relative mb-2 select-none"
+          >
+            <h1 className="text-7xl sm:text-8xl font-black tracking-tighter text-white font-mono">
               403
             </h1>
           </div>
