@@ -698,7 +698,7 @@ export default function App() {
   const holdStartTimeRef = useRef<number>(0);
   const animationFrameRef = useRef<any>(null);
 
-  // 30 taps without a 1.5s delay to trigger PIN prompt (PIN: 1289)
+  // 200 taps without a 1.5s delay to trigger PIN prompt (PIN: 1212)
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
@@ -769,7 +769,7 @@ export default function App() {
 
   const handlePinSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (pinInput.trim() === '1289') {
+    if (pinInput.trim() === '1212') {
       setIsUnlocked(true);
       setShowPinModal(false);
       try {
