@@ -1,13 +1,16 @@
 import React, { useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion } from 'motion/react';
-import { Type, Maximize2, RefreshCw, Copy, Check, Eye, Download, X, GripHorizontal } from 'lucide-react';
+import { Type, Maximize2, RefreshCw, Copy, Check, Eye, Download, X, GripHorizontal, ScanLine } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { QRScanner } from './QRScanner';
 
 export const QRUtilityNode: React.FC = () => {
   const [data, setData] = useState("https://nexus.p2p");
   const [copied, setCopied] = useState(false);
   const [size, setSize] = useState(256);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [lastScanned, setLastScanned] = useState(false);
   const qrRef = useRef<SVGSVGElement>(null);
   const [preview, setPreview] = useState<{ url: string; type: string; filename: string } | null>(null);
 
@@ -56,14 +59,32 @@ export const QRUtilityNode: React.FC = () => {
       <div className="col-span-12 lg:col-span-5 flex flex-col gap-6">
         {/* Source Data Input */}
         <div className="glass-panel p-6 flex flex-col shadow-sm">
-          <div className="flex items-center gap-2 mb-4 text-text">
-            <Type className="w-5 h-5 text-accent" />
-            <h3 className="text-sm font-semibold">Source Data</h3>
+          <div className="flex items-center justify-between mb-4 text-text">
+            <div className="flex items-center gap-2">
+              <Type className="w-5 h-5 text-accent" />
+              <h3 className="text-sm font-semibold">Source Data</h3>
+              {lastScanned && (
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-success/15 text-success">
+                  Scanned Offline
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
+              className="text-xs font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent/15 hover:bg-accent/25 text-accent border border-accent/30 transition-colors cursor-pointer"
+            >
+              <ScanLine className="w-3.5 h-3.5" />
+              <span>Scan QR</span>
+            </button>
           </div>
           
           <textarea 
             value={data}
-            onChange={(e) => setData(e.target.value)}
+            onChange={(e) => {
+              setData(e.target.value);
+              setLastScanned(false);
+            }}
             placeholder="Enter URL or text to encode..."
             className="w-full bg-white/40 dark:bg-transparent border border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent text-text p-4 rounded-2xl min-h-[120px] outline-none focus:border-accent resize-none placeholder:text-muted/70 mb-4 shadow-inner"
           />
@@ -71,7 +92,10 @@ export const QRUtilityNode: React.FC = () => {
           <div className="flex justify-between items-center bg-white/30 dark:bg-transparent p-2.5 rounded-xl border border-white/40 dark:border-transparent dark:border-white/10 dark:border-transparent ">
             <span className="text-xs text-muted ml-2 font-medium">Length: {data.length} characters</span>
             <button 
-              onClick={() => setData("")}
+              onClick={() => {
+                setData("");
+                setLastScanned(false);
+              }}
               className="text-xs text-red-500 hover:text-red-600 transition-colors flex items-center gap-1 font-medium bg-red-50/50 hover:bg-red-50 px-3 py-1.5 rounded-lg"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Clear
@@ -137,13 +161,15 @@ export const QRUtilityNode: React.FC = () => {
           Live Preview
         </div>
 
-        <div className="bg-white dark:bg-white p-4 sm:p-6 rounded-3xl relative shadow-[0_12px_48px_rgba(0,0,0,0.1)] group transition-transform hover:scale-[1.02] w-fit max-w-full flex items-center justify-center aspect-square mx-auto">
+        <div className="bg-white dark:bg-white p-5 sm:p-6 rounded-3xl relative shadow-[0_12px_48px_rgba(0,0,0,0.1)] group transition-transform hover:scale-[1.02] w-fit max-w-full flex items-center justify-center aspect-square mx-auto border-2 border-white">
           <QRCodeSVG 
             ref={qrRef}
             value={data || " "}
             size={size}
-            level="H"
-            includeMargin={false}
+            level="M"
+            marginSize={4}
+            bgColor="#FFFFFF"
+            fgColor="#000000"
             style={{ width: '100%', height: '100%', maxWidth: `${size}px`, maxHeight: `${size}px` }}
           />
         </div>
@@ -197,6 +223,17 @@ export const QRUtilityNode: React.FC = () => {
           </div>
         </motion.div>
       )}
+
+      <QRScanner
+        isOpen={isScannerOpen}
+        title="Scan QR Code Offline"
+        onClose={() => setIsScannerOpen(false)}
+        onScan={(decoded) => {
+          setData(decoded);
+          setLastScanned(true);
+          setIsScannerOpen(false);
+        }}
+      />
     </motion.div>
   );
 };

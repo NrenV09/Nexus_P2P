@@ -20,10 +20,14 @@ import {
   Sun,
   Network,
   Maximize2,
-  Lock
+  Lock,
+  ScanLine
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 import { cn, formatBytes } from '../lib/utils';
+import { encodeSDPForQR, decodeSDPFromQR } from '../lib/sdpCodec';
+import { QRScanner } from '../components/QRScanner';
 import { 
   NodeRole, 
   ConnectionStatus, 
@@ -842,44 +846,20 @@ export default function App() {
     addLog("Generating matrix offer...", "info");
     await waitForIce(pc, 600);
     
-    const sdp = JSON.stringify(pc.localDescription);
-    const compressed = btoa(encodeURIComponent(sdp));
+    if (!pc.localDescription) {
+      addLog("Failed to gather ICE candidates for offer", "err");
+      return;
+    }
+
+    const compressed = encodeSDPForQR(pc.localDescription);
     setQrPayload(compressed);
     addLog("Offer ready. Peer sync required.", "ok");
-  };
-
-  const decodeSDP = (input: string) => {
-    if (!input) throw new Error("Empty protocol string");
-    const clean = input.trim();
-    if (clean.startsWith('{') && clean.endsWith('}')) {
-      return clean;
-    }
-    try {
-      const decompressed = decodeURIComponent(atob(clean));
-      if (decompressed && decompressed.trim().startsWith('{')) return decompressed.trim();
-    } catch {}
-    try {
-      const decoded = atob(clean);
-      if (decoded && decoded.trim().startsWith('{')) return decoded.trim();
-    } catch {}
-    try {
-      const unescaped = decodeURIComponent(clean);
-      if (unescaped.startsWith('{') && unescaped.endsWith('}')) return unescaped.trim();
-      const decoded = atob(unescaped);
-      if (decoded && decoded.trim().startsWith('{')) return decoded.trim();
-    } catch {}
-    throw new Error("Invalid or corrupt protocol string format");
   };
 
   const handleReceivedOffer = async (input: string) => {
     if (!input) return;
     try {
-      const sdpString = decodeSDP(input);
-      const parsedSdp = JSON.parse(sdpString);
-
-      if (!parsedSdp || typeof parsedSdp !== 'object') {
-        throw new Error("Malformed protocol descriptor object");
-      }
+      const parsedSdp = decodeSDPFromQR(input);
 
       if (parsedSdp.type !== 'offer') {
         addLog(`Invalid offer: Received descriptor of type "${parsedSdp.type}". Scan a Host Offer QR code.`, "err");
@@ -902,8 +882,7 @@ export default function App() {
         throw new Error("Failed to produce answer local description");
       }
 
-      const answerSdp = JSON.stringify(pc.localDescription);
-      const compressed = btoa(encodeURIComponent(answerSdp));
+      const compressed = encodeSDPForQR(pc.localDescription);
       setQrPayload(compressed);
       addLog("Response generated. Finalize handshake at host.", "ok");
     } catch (e: any) {
@@ -916,12 +895,7 @@ export default function App() {
     if (!sdp || !localConnectionRef.current) return;
     
     try {
-      const sdpString = decodeSDP(sdp);
-      const parsedSdp = JSON.parse(sdpString);
-
-      if (!parsedSdp || typeof parsedSdp !== 'object') {
-        throw new Error("Malformed protocol descriptor object");
-      }
+      const parsedSdp = decodeSDPFromQR(sdp);
 
       if (parsedSdp.type !== 'answer') {
         addLog(`Invalid answer: Received descriptor of type "${parsedSdp.type}". Scan a Joiner Answer QR code.`, "err");
@@ -1426,14 +1400,14 @@ export default function App() {
                             {qrPayload ? (
                               <>
                                 <div 
-                                  className="bg-white dark:bg-transparent p-4 rounded-3xl relative shadow-xl mt-4 cursor-pointer hover:scale-[1.02] transition-transform"
+                                  className="bg-white dark:bg-white p-5 rounded-3xl relative shadow-xl mt-4 cursor-pointer hover:scale-[1.02] transition-transform border-2 border-white"
                                   onClick={() => {
                                     navigator.clipboard.writeText(qrPayload);
                                     addLog("Offer string copied to clipboard", "ok");
                                   }}
                                   title="Click to copy protocol matrix"
                                 >
-                                  
+                                  <QRCodeSVG value={qrPayload} size={256} level="L" marginSize={4} bgColor="#FFFFFF" fgColor="#000000" />
                                 </div>
                                 <div className="flex gap-2 mt-4 w-full object-contain max-w-[250px]">
                                   <button 
@@ -1476,14 +1450,14 @@ export default function App() {
                             {qrPayload ? (
                               <>
                                 <div 
-                                  className="bg-white dark:bg-transparent p-4 rounded-3xl relative shadow-xl mt-4 cursor-pointer hover:scale-[1.02] transition-transform"
+                                  className="bg-white dark:bg-white p-5 rounded-3xl relative shadow-xl mt-4 cursor-pointer hover:scale-[1.02] transition-transform border-2 border-white"
                                   onClick={() => {
                                     navigator.clipboard.writeText(qrPayload);
                                     addLog("Answer string copied to clipboard", "ok");
                                   }}
                                   title="Click to copy protocol matrix"
                                 >
-                                  
+                                  <QRCodeSVG value={qrPayload} size={256} level="L" marginSize={4} bgColor="#FFFFFF" fgColor="#000000" />
                                 </div>
                                 <p className="mt-8 text-sm font-medium text-success bg-success/10 rounded-2xl p-4 w-full">
                                   Answer generated. Present to host.
@@ -1492,9 +1466,10 @@ export default function App() {
                             ) : (
                               <button 
                                 onClick={() => setScannerType('offer')}
-                                className="w-full py-4 border border-dashed border-white/60 dark:border-transparent dark:border-white/10 dark:border-transparent bg-white/30 dark:bg-transparent rounded-xl hover:bg-white/50 dark:hover:bg-black/5 transition-all text-text font-medium shadow-sm"
+                                className="w-full py-4 border border-dashed border-white/60 dark:border-white/20 bg-white/30 dark:bg-white/5 rounded-xl hover:bg-white/50 dark:hover:bg-white/10 transition-all text-text font-medium shadow-sm flex items-center justify-center gap-2.5 cursor-pointer"
                               >
-                                Scan Peer Matrix
+                                <ScanLine className="w-5 h-5 text-accent" />
+                                <span>Scan Peer Matrix</span>
                               </button>
                             )}
                           </div>
@@ -1512,9 +1487,12 @@ export default function App() {
                             <div className="flex gap-2 w-full">
                               <button 
                                 onClick={() => setScannerType('answer')}
-                                className="flex-shrink-0 w-12 flex items-center justify-center bg-white/50 dark:bg-transparent border border-white/50 dark:border-transparent dark:border-white/10 dark:border-transparent hover:bg-white/70 dark:bg-transparent transition-colors rounded-xl shadow-sm text-text"
+                                title="Scan Joiner Answer QR Code"
+                                aria-label="Scan Joiner Answer QR Code"
+                                className="flex-shrink-0 px-3.5 flex items-center justify-center gap-1.5 bg-white/50 dark:bg-white/10 border border-white/50 dark:border-white/20 hover:bg-white/70 dark:hover:bg-white/15 transition-colors rounded-xl shadow-sm text-text cursor-pointer"
                               >
-                                <Monitor className="w-5 h-5" />
+                                <ScanLine className="w-5 h-5 text-accent" />
+                                <span className="text-xs font-semibold">Scan</span>
                               </button>
                               <button 
                                 disabled={!pasteBuffer}
@@ -1909,6 +1887,16 @@ export default function App() {
           </a>
         </div>
       )}
+      <QRScanner
+        isOpen={scannerType !== null}
+        title={scannerType === 'offer' ? 'Scan Host Offer QR' : 'Scan Peer Answer QR'}
+        onClose={() => setScannerType(null)}
+        onScan={(data) => {
+          if (scannerType === 'offer') handleReceivedOffer(data);
+          else if (scannerType === 'answer') handleReceivedAnswer(data);
+          setScannerType(null);
+        }}
+      />
     </div>
   );
 }
